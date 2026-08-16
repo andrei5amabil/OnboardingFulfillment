@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
 .env
+src/frontend/.env
 
 node_modules/

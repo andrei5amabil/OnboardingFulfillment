@@ -16,10 +16,19 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="FastAPI + Supabase Setup")
 
-class Item(BaseModel):
-    name: str
-    price: float
-    is_offer: bool | None = None
+class Request(BaseModel):
+    first_name: str
+    last_name: str
+    department: str
+    role: str
+    start_date: str  # ISO format date string
+    employment_type: str
+    location: str
+    work_location: str
+    notes: str = None  # Optional field
+    request_id: str 
+    hr_manager_id: str
+    employee_id: str
 
 @app.get("/health/supabase")
 def check_sb_connection():
@@ -47,14 +56,12 @@ def check_sb_connection():
             detail=f"Could not reach local Supabase instance: {error_str}"
         )
 
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: str | None = None):
-    return {"item_id": item_id, "q": q}
-
-@app.put("/items/{item_id}")
-def update_item(item_id: int, item: Item):
-    supabase_response = supabase.table("items").update(item.dict()).eq("id", item_id).execute()
-    if supabase_response.status_code != 200:
-        raise HTTPException(status_code=supabase_response.status_code, detail=supabase_response.data)
-    return {"item_id": item_id, "item": supabase_response.data}
+@app.put("/onboarding/requests")
+def create_onboarding_request(item: Request):
+    try:
+        response = supabase.table("onboarding_requests").insert(item).execute()
+        if response.status_code != 201:
+            raise HTTPException(status_code=response.status_code, detail=response.data)
+        return {"status": "success", "message": "Onboarding request created.", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
