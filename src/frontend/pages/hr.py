@@ -7,6 +7,9 @@ load_dotenv()
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
+if "user_id" not in st.session_state:
+    st.session_state.user_id = "HR-001"
+
 st.title("📝 Employee Onboarding Intake")
 st.caption("Submit new hire details to initiate the automated provisioning pipeline.")
 
@@ -14,15 +17,15 @@ with st.form("new_employee_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
         first_name = st.text_input(label="First Name")
-        department = st.selectbox(label="Department", options=["Engineering", "Product", "Sales", "Design", "HR", "IT", "Management"])
-        location = st.text_input(label="Location(Country, City)")
-        work_location = st.selectbox(label="Work Location", options=["Remote", "On-site", "Hybrid"])
+        department = st.selectbox(label="Department", options=["engineering", "product", "sales", "design", "hr", "it", "management"])
+        location = st.selectbox(label="Location(Country, City)", options=["Romania, Timisoara", "France, Paris", "China, Beijing"])
+        work_location = st.selectbox(label="Work Location", options=["remote", "on-site", "hybrid"])
     
     with col2:
         last_name = st.text_input(label="Last Name")
         role = st.text_input(label="Role")
         start_date = st.date_input(label="Start Date")
-        employment_type = st.selectbox(label="Employment Type", options=["Full-time", "Part-time", "Contract"])
+        employment_type = st.selectbox(label="Employment Type", options=["full-time", "part-time", "contract"])
 
     notes = st.text_area(label="Additional Onboarding Notes")
     warning = st.text("⚠️ All fields are required except for 'Additional Onboarding Notes'.")
@@ -41,6 +44,7 @@ if submitted:
             "employment_type": employment_type,
             "location": location,
             "work_location": work_location,
+            "hr_manager_id": st.session_state.user_id,
             "notes": notes
         }
         
@@ -48,7 +52,7 @@ if submitted:
             res = requests.post(f"{API_URL}/onboarding/requests", json=payload, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                st.success(f"Onboarding pipeline started for **{first_name} {last_name}** (Process ID: `{data.get('id', 'N/A')}`).")
+                st.success(f"Onboarding pipeline started for **{first_name} {last_name}** .")
             else:
                 st.error(f"Failed to submit: {res.json().get('detail', 'Unknown error')}")
         except requests.exceptions.ConnectionError:
