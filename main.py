@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from supabase import create_client, Client
 from postgrest import APIError
+from datetime import date, datetime
 
 load_dotenv()
 
@@ -30,6 +31,22 @@ class Request(BaseModel):
     work_location: str
     notes: Optional[str] = ""  # Optional field
     hr_manager_id: str
+
+class DB_Request(BaseModel):
+    request_id: str
+    created_at: datetime
+    employee_id: str
+    first_name: str
+    last_name: str
+    department: str
+    role: str
+    start_date: date
+    employment_type: str
+    location: str
+    work_location: str
+    hr_manager_id: str
+    notes: Optional[str] = None
+    status: str
 
 def generate_employee_id() -> str:
     try:
@@ -91,7 +108,7 @@ def create_onboarding_request(item: Request):
             "work_location": item.work_location,
             "notes": item.notes,
             "hr_manager_id": item.hr_manager_id,
-            "status": "pending"
+            "status": "pending_onboarding"
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
 
@@ -110,4 +127,33 @@ def create_onboarding_request(item: Request):
                 "details": err.details,
                 "hint": err.hint,
             },
+        )
+
+@app.get("/onboarding/requests",response_model=list[DB_Request],status_code=status.HTTP_200_OK)
+def provide_requests(limit: int=10):
+    try:
+        # Note: Match the status you set in create_onboarding_request ('pending_onboarding')
+        response = (
+            supabase.table("onboarding_requests")
+            .select("*")
+            .eq("status", "pending_onboarding")
+            .order("created_at", desc=False)
+            .limit(limit)
+            .execute()
+        )
+        return response.data
+    except APIError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": err.message,
+                "code": err.code,
+                "details": err.details,
+                "hint": err.hint,
+            },
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve requests: {str(e)}",
         )

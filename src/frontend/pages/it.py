@@ -24,20 +24,7 @@ else:
         with st.container(border=True):
             col_info, col_action = st.columns([3, 1])
             with col_info:
-                st.markdown(f"### {task.get('full_name')} — `{task.get('role')}`")
-                st.write(f"**Department:** {task.get('department')} | **Hardware:** {task.get('hardware_tier')}")
+                st.markdown(f"### {task.get('first_name')} {task.get('last_name')}")
+                st.write(f"**Department:** {task.get('department')} | **Role:** {task.get('role')}")
                 st.write(f"**Status:** `{task.get('status')}`")
-            
-            with col_action:
-                st.write("")
-                if st.button("Approve & Provision", key=f"btn_{task.get('id')}", type="primary"):
-                    approval_res = requests.post(
-                        f"{API_URL}/onboarding/{task.get('id')}/approve",
-                        json={"status": "approved"},
-                        timeout=5
-                    )
-                    if approval_res.status_code == 200:
-                        st.toast(f"Approved provisioning for {task.get('full_name')}!")
-                        st.rerun()
-                    else:
-                        st.error("Failed to approve task.")
+                st.write(f"**Approved by HR:** {task.get('hr_manager_id')}")
