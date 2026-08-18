@@ -4,7 +4,7 @@ SET session_replication_role = replica;
 -- PostgreSQL database dump
 --
 
--- \restrict gfx2Od5S7UyitoRqdHAWw6DzfuwbxDcgxRz4ZTmwlAQt3O3Y0XGkiuw8bu6fjSl
+-- \restrict OGVlIrDtnvLs0XcAphwAnuQ4F0OtPqXJBvWkM9S7d9fi1PWg6glBqXmxEYr2Sik
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -26,9 +26,11 @@ SET row_security = off;
 --
 
 INSERT INTO "public"."onboarding_requests" ("request_id", "created_at", "employee_id", "first_name", "last_name", "department", "role", "start_date", "employment_type", "location", "work_location", "hr_manager_id", "notes", "status") VALUES
-	('ONB-026590A0', '2026-08-17 16:21:35.279116+00', 'EMP-0003', 'Ionean', 'Gajat', 'engineering', 'Junior Backend Developer', '2026-08-27', 'full-time', 'Romania, Timisoara', 'remote', 'HR-001', '', 'pending'),
-	('ONB-3EF3CF0C', '2026-08-17 17:01:16.626444+00', 'EMP-0004', 'Eypee', 'Ai', 'it', 'Lead Backend Developer', '2026-08-27', 'full-time', 'Romania, Timisoara', 'remote', 'HR-001', '', 'pending'),
-	('ONB-001', '2026-08-17 16:14:07.080871+00', 'EMP-0002', 'Jack', 'Employee', 'IT', 'Helpdesk', '2026-08-28', 'full-time', 'Romania, Timisoara', 'hybrid', 'EMP-042', NULL, 'pending_onboarding');
+	('ONB-47E6F6D5', '2026-08-18 14:39:38.03218+00', 'EMP-0006', 'Son', 'Sonion', 'Software Engineering & Application Modernization', 'Junior Frontend Developer', '2026-08-18', 'full-time', 'Romania, Timisoara', 'remote', 'EMP-0042', '', 'pending_onboarding'),
+	('ONB-3EF3CF0C', '2026-08-17 17:01:16.626444+00', 'EMP-0004', 'Eypee', 'Ai', 'it', 'Lead Backend Developer', '2026-08-27', 'full-time', 'Romania, Timisoara', 'remote', 'EMP-0042', '', 'pending_onboarding'),
+	('ONB-0AD7EC13', '2026-08-17 20:03:39.698228+00', 'EMP-0005', 'Large L.', 'Model', 'it', 'Junior Frontend Developer', '2025-08-13', 'full-time', 'Romania, Timisoara', 'remote', 'EMP-0042', '', 'pending_onboarding'),
+	('ONB-026590A0', '2026-08-17 16:21:35.279116+00', 'EMP-0003', 'Ionean', 'Gajat', 'engineering', 'Junior Backend Developer', '2026-08-27', 'full-time', 'Romania, Timisoara', 'remote', 'EMP-0042', '', 'pending_onboarding'),
+	('ONB-001', '2026-08-17 16:14:07.080871+00', 'EMP-0002', 'Jack', 'Employee', 'IT', 'Helpdesk', '2026-08-28', 'full-time', 'Romania, Timisoara', 'hybrid', 'EMP-0042', NULL, 'pending_onboarding');
 
 
 --
@@ -44,6 +46,6 @@ INSERT INTO "public"."employees" ("employee_id", "created_at", "onboarding_reque
 -- PostgreSQL database dump complete
 --
 
--- \unrestrict gfx2Od5S7UyitoRqdHAWw6DzfuwbxDcgxRz4ZTmwlAQt3O3Y0XGkiuw8bu6fjSl
+-- \unrestrict OGVlIrDtnvLs0XcAphwAnuQ4F0OtPqXJBvWkM9S7d9fi1PWg6glBqXmxEYr2Sik
 
 RESET ALL;
