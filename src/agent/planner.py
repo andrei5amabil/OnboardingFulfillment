@@ -83,7 +83,7 @@ class OnboardingAgent:
 if __name__ == "__main__":
     agent = OnboardingAgent()
     
-    # Realistic test payload matching Popescu's DB_Request schema
+    # Realistic test payload matchingDB_Request schema
     sample_payload = {
         "request_id": "ONB-47E6F6D5",
         "employee_id": "EMP-0006",
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         "notes": "Employee requested elevated admin access to AWS IAM Console and a DataGrip license."
     }
     
-    # Exact rules matching Popescu's product_assignment_rules table
+    # Exact rules matching product_assignment_rules table
     sample_rules = [
         {
             "rule_id": "R-SE-GWS-01",
@@ -123,7 +123,7 @@ if __name__ == "__main__":
         }
     ]
     
-    # Exact inventory matching Popescu's software_products table
+    # Exact inventory matching software_products table
     sample_inventory = [
         {"product_id": "PROD-GWS-01", "name": "Google Workspace", "available_seats": 980, "requires_approval": False},
         {"product_id": "PROD-JIR-01", "name": "Jira", "available_seats": 450, "requires_approval": False},
