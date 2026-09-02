@@ -13,3 +13,16 @@ wheels/
 src/frontend/.env
 
 node_modules/
+# Environment variables
+.env
+
+# Virtual environments
+.venv/
+
+# Local databases and vector stores
+data/
+*.db
+
+# Python caches
+__pycache__/
+*.pyc

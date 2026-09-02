@@ -1,13 +1,21 @@
-Title: Access Exception & Privilege Escalation Policy
-1. Purpose and Scope
-This policy governs the protocol for any user access request that deviates from the predefined departmental and role-based baseline.It ensures that non-standard requests are securely triaged, explicitly justified, and manually approved without causing the 24-48 hour operational delays seen in traditional asynchronous ticket management.  
-2. Baseline Deviations (Diffs)
-Role Mismatch: An exception is automatically triggered if an incoming HR payload requests a license, hardware asset, or network enclave that is not explicitly mapped to the user's role in the product_assignment_rules table.  
-Agent Triage: The LLM orchestration agent must not automatically execute provisioning for out-of-band requests. Instead, it must isolate these requests into an exception block within the generated JSON plan.  
-3. Privileged Access Management (PAM)High-Risk Systems: Requests for administrative rights, root-level database access, or global SaaS admin consoles (e.g., 365 Admin Center) are classified as Privilege Escalations. 
- Mandatory Justification: Any HR payload containing a request for Privileged Access must include a notes string containing the business justification. If omitted, the request is automatically rejected by the orchestration engine.  
-4. Human-in-the-Loop (HITL) Gateway
-Diff Inspection: All flagged exceptions and privilege escalations must be routed to the Human-in-the-Loop (HITL) gateway dashboard.  IT Admin Authorization: The IT Admin must inspect the generated plan, review the RAG-cited policy clauses, and evaluate the specific differences (diffs) between the standard role entitlements and the requested exceptions. 
- Explicit Action: The execution engine remains locked until the IT Admin explicitly clicks the Approve or Reject action on the dashboard.  
-5. Audit and Compliance
-Escalation Logging: If an exception is approved via the HITL dashboard, the specific approval action, the admin's identity, and the business justification must be permanently written to the audit log to satisfy compliance audits.  
+# POL-EXC-001: Access Exception & Privilege Escalation Policy
+
+## Section 1: Purpose and Scope
+1.1. This policy governs the protocol for any user access request that deviates from the predefined departmental and role-based baseline.
+1.2. It ensures non-standard requests are securely triaged, justified, and manually approved without operational delay.
+
+## Section 2: Baseline Deviations (Diffs)
+2.1. Role Mismatch: An exception is triggered if an incoming HR payload requests a license, hardware asset, or network enclave not mapped in product_assignment_rules.
+2.2. Agent Triage: The LLM agent must isolate out-of-band requests into a dedicated exception proposal block and require human approval.
+
+## Section 3: Privileged Access Management (PAM)
+3.1. High-Risk Systems: Requests for administrative rights, root-level database access, or global SaaS admin consoles are classified as Privilege Escalations.
+3.2. Mandatory Justification: Any HR payload requesting Privileged Access must include a justification in the notes field. If missing, the request is marked as rejected.
+
+## Section 4: Human-in-the-Loop (HITL) Gateway
+4.1. Diff Inspection: All flagged exceptions and privilege escalations must route to the HITL gateway dashboard.
+4.2. Admin Authorization: The IT Admin must review the RAG-cited policy clauses and diffs before approving.
+4.3. Execution Lock: Deterministic tools remain locked until the IT Admin explicitly clicks Approve or Reject.
+
+## Section 5: Audit and Compliance
+5.1. Escalation Logging: Approved exceptions must permanently record the admin ID, timestamp, and justification in the audit log.

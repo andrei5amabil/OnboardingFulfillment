@@ -1,12 +1,17 @@
-Title: Offboarding Compliance & Data Retention Guidelines
-1. Purpose and Scope
-This policy establishes the mandatory sequence of events for a departing employee to eliminate security vulnerabilities and data leaks.It guarantees that the automated process mitigates the high risk of orphaned accounts.  
-2. Immediate Access Revocation
-On the approved termination date, the deterministic execution engine must immediately disable login capabilities.  The system is required to instantly revoke all active sessions and cryptographic tokens.  
-All group memberships must be removed, access must be revoked, and all assigned SaaS licenses must be reclaimed to free up seats.  
-3. Asset Transfer & Data Retention
-To ensure business continuity, the offboarding plan must strictly transfer ownership of files, repositories, and active tasks to the departing employee's manager or a designated replacement.  
-The execution engine must queue asset return tasks to reclaim physical hardware.  The deactivated digital identity is retained in a suspended, non-interactive state for 90 days to comply with data retention and legal hold requirements before permanent cryptographic deletion.
-4. Verification & Audit
-The workflow must conclude with a mandatory system check to verify Zero Residual Access.  If residual access is detected by the system, it must halt and alert the IT admin for the manual remediation of access and permissions.  
-Only when zero access is confirmed will the system finalize the process by generating a Compliance Report and Audit log.  	
+# POL-OFF-001: Offboarding Compliance & Data Retention Guidelines
+
+## Section 1: Purpose and Scope
+1.1. This policy establishes the sequence of events for departing employees to prevent security vulnerabilities and orphaned accounts.
+
+## Section 2: Immediate Access Revocation
+2.1. Deactivation: On the termination date, login capabilities, active sessions, and cryptographic tokens must be terminated immediately.
+2.2. Entitlement Removal: Group memberships and SaaS licenses must be revoked to reclaim seats.
+
+## Section 3: Asset Transfer & Data Retention
+3.1. Asset Transfer: File ownership, code repositories, and active tasks must be transferred to the direct manager or designated replacement.
+3.2. Hardware Reclamation: Physical hardware return tasks must be scheduled based on work location.
+3.3. Legal Hold: The digital identity remains in a suspended state for 90 days prior to permanent deletion.
+
+## Section 4: Verification & Audit
+4.1. Zero Residual Access: The system must verify zero residual access across all systems before generating the final compliance report.
+4.2. Remediation: If residual access is detected, the workflow pauses and alerts the IT Admin for manual remediation.
