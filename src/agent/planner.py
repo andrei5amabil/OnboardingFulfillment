@@ -31,21 +31,25 @@ class OnboardingAgent:
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "You are an enterprise IT Security & Onboarding Orchestrator.\n"
-                "Your job is to strictly enforce access policies and protect enterprise assets.\n\n"
+                "Your job is to strictly enforce access policies, evaluate entitlements, and output structured fulfillment plans.\n\n"
                 "CRITICAL SECURITY RULES:\n"
-                "1. PRIVILEGED ACCESS: Any request for root, production database, or admin consoles (e.g., 'AWS Production Root') "
-                "is a Privilege Escalation. It MUST be marked with requires_approval=True, risk_level='high', and hitl_required=True.\n"
-                "2. STOCK DEFICITS: If an item has available_seats <= 0 (e.g., DataGrip with 0 seats), you MUST NOT auto-approve it. "
+                "1. PRIVILEGED ACCESS: Any request for root, infrastructure admin, or privileged consoles "
+                "(e.g., elevated admin on 'AWS IAM Console', production database credentials) is a Privilege Escalation. "
+                "It MUST be set to requires_approval=True, action_type='flag_exception', and trigger hitl_required=True.\n"
+                "2. STOCK DEFICITS: If an item has available_seats <= 0, you MUST NOT auto-approve it. "
                 "Flag requires_approval=True, action_type='flag_exception', and hitl_required=True.\n"
-                "3. OUT-OF-BAND REQUESTS: Any software requested in notes that is NOT in Baseline Entitlements requires HITL approval.\n"
-                "4. CITATIONS: You MUST populate the 'citations' array with the exact rule_id, document_name, and quote from the retrieved policies."
+                "3. CATALOG MAPPING: In ProposedAction, set 'target_id' to the specific product_id (e.g., 'PROD-AWS-01', 'PROD-GWS-01') "
+                "or the specific role-based asset identifier.\n"
+                "4. ACTION TYPES: Use 'assign_license' for standard software provisioning. Use 'flag_exception' for denied, out-of-band, or approval-blocked requests.\n"
+                "5. OUT-OF-BAND REQUESTS: Any software requested in notes that is not granted by Baseline Entitlements requires approval.\n"
+                "6. CITATIONS: Populate the 'citations' array with the exact rule_id, document_name, and quote from the retrieved policies."
             )),
             ("user", (
                 "### Incoming HR Payload:\n{hr_payload}\n\n"
                 "### Baseline Entitlement Rules (Allowed by Default):\n{baseline_rules}\n\n"
                 "### Current Software & Asset Inventory:\n{inventory_status}\n\n"
                 "### Mandatory Applicable Policies:\n{retrieved_policies}\n\n"
-                "Evaluate the request and output the structured OnboardingPlan JSON adhering strictly to the above rules."
+                "Evaluate the request and generate the structured OnboardingPlan JSON adhering strictly to the above rules."
             ))
         ])
 
@@ -55,9 +59,9 @@ class OnboardingAgent:
         baseline_rules: list,
         inventory_status: list
     ) -> OnboardingPlan:
-        notes = hr_payload.get("notes", "")
-        role = hr_payload.get("role", "")
-        work_location = hr_payload.get("work_location", "")
+        # Guard against None values coming from the database
+        notes = hr_payload.get("notes") or ""
+        role = hr_payload.get("role") or ""
 
         retrieved_docs: List[PolicyCitation] = []
         retrieved_docs.extend(self.retriever.retrieve_citations(f"{role} baseline hardware and access", k=2))
@@ -79,28 +83,56 @@ class OnboardingAgent:
 if __name__ == "__main__":
     agent = OnboardingAgent()
     
-    # Run the same test payload as before
+    # Realistic test payload matching Popescu's DB_Request schema
     sample_payload = {
         "request_id": "ONB-47E6F6D5",
         "employee_id": "EMP-0006",
         "first_name": "Son",
         "last_name": "Sonion",
-        "department": "Software Engineering",
+        "department": "Software Engineering & Application Modernization",
         "role": "Junior Frontend Developer",
+        "start_date": "2026-08-18",
+        "employment_type": "full-time",
+        "location": "Romania, Timisoara",
         "work_location": "remote",
-        "notes": "Employee requested access to AWS Production Root and DataGrip."
+        "hr_manager_id": "EMP-0042",
+        "notes": "Employee requested elevated admin access to AWS IAM Console and a DataGrip license."
     }
+    
+    # Exact rules matching Popescu's product_assignment_rules table
     sample_rules = [
-        {"role": "Junior Frontend Developer", "product_name": "GitHub Enterprise", "requires_approval": False},
-        {"role": "Junior Frontend Developer", "product_name": "VS Code", "requires_approval": False}
+        {
+            "rule_id": "R-SE-GWS-01",
+            "department": "Software Engineering & Application Modernization",
+            "role": "Junior Frontend Developer",
+            "product_id": "PROD-GWS-01",
+            "product_name": "Google Workspace",
+            "access_level": "standard",
+            "is_mandatory": True,
+            "requires_approval": False
+        },
+        {
+            "rule_id": "R-SE-JIR-01",
+            "department": "Software Engineering & Application Modernization",
+            "role": "Junior Frontend Developer",
+            "product_id": "PROD-JIR-01",
+            "product_name": "Jira",
+            "access_level": "user",
+            "is_mandatory": True,
+            "requires_approval": False
+        }
     ]
+    
+    # Exact inventory matching Popescu's software_products table
     sample_inventory = [
-        {"product_name": "GitHub Enterprise", "available_seats": 12},
-        {"product_name": "DataGrip", "available_seats": 0},
-        {"product_name": "AWS Production Root", "available_seats": 1}
+        {"product_id": "PROD-GWS-01", "name": "Google Workspace", "available_seats": 980, "requires_approval": False},
+        {"product_id": "PROD-JIR-01", "name": "Jira", "available_seats": 450, "requires_approval": False},
+        {"product_id": "PROD-GH-01", "name": "GitHub Enterprise", "available_seats": 920, "requires_approval": False},
+        {"product_id": "PROD-AWS-01", "name": "AWS IAM Console", "available_seats": 50, "requires_approval": True},
+        {"product_id": "PROD-DGR-01", "name": "DataGrip", "available_seats": 0, "requires_approval": True}
     ]
 
-    print("[*] Running agent reasoning with Observability Tracing...")
+    print("[*] Running agent reasoning with real catalog IDs...")
     decision = agent.evaluate_request(sample_payload, sample_rules, sample_inventory)
     print("\n[+] Structured Decision Plan:")
     print(decision.model_dump_json(indent=2))
