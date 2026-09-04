@@ -67,7 +67,7 @@ else:
                             "License Type": (r.get("software_products") or {}).get("license_type", "N/A"),
                             "Access Level": r.get("access_level"),
                             "Mandatory": "✅" if r.get("is_mandatory") else "❌",
-                            "Needs Approval": "⚠️" if r.get("requires_approval") else "No",
+                            "Needs Approval": "Yes" if r.get("requires_approval") else "No",
                         }
                         for r in rules
                     ]

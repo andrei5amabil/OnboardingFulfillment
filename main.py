@@ -49,9 +49,32 @@ class DB_Request(BaseModel):
     status: str
     workflow_runs: Optional[list[dict]] = []
 
+def deduplicate_rules(rules: list[dict]) -> list[dict]:
+    """Ensures role-specific rules override department or global defaults for the same product."""
+    def rule_priority(r: dict) -> int:
+        if r.get("role"):
+            return 3  # Role-specific
+        if r.get("department"):
+            return 2  # Department baseline
+        return 1      # Global baseline
+
+    # Sort so higher-priority rules come last, overwriting earlier ones in the dict
+    sorted_rules = sorted(rules, key=rule_priority)
+    product_map = {
+        r["software_products"]["product_id"]: r 
+        for r in sorted_rules 
+        if r.get("software_products")
+    }
+    return list(product_map.values())
+
 def generate_initial_plan(request_id: str, department: str, role: str):
     try:
         supabase.table("onboarding_requests").update({"status": "processing_rules"}).eq("request_id", request_id).execute()
+        filter_query = (
+            f'department.is.null,'
+            f'and(department.eq."{department}",role.is.null),'
+            f'and(department.eq."{department}",role.eq."{role}")'
+        )
 
         rules_res = (
             supabase.table("product_assignment_rules")
@@ -59,8 +82,7 @@ def generate_initial_plan(request_id: str, department: str, role: str):
                 "rule_id, access_level, is_mandatory, requires_approval, "
                 "software_products(product_id, name, vendor, license_type)"
             )
-            .eq("department", department)
-            .eq("role", role)
+            .or_(filter_query)
             .execute()
         )
 
@@ -70,7 +92,7 @@ def generate_initial_plan(request_id: str, department: str, role: str):
         # Insert fresh plan
         supabase.table("workflow_runs").insert({
             "request_id": request_id,
-            "suggested_licenses": rules_res.data,
+            "suggested_licenses": deduplicate_rules(rules_res.data),
             "suggested_hardware": {},
             "policy_citations": [],
         }).execute()
