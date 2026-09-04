@@ -2,7 +2,7 @@ import os
 import uuid
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from supabase import create_client, Client
 from postgrest import APIError
@@ -47,6 +47,38 @@ class DB_Request(BaseModel):
     hr_manager_id: str
     notes: Optional[str] = None
     status: str
+    workflow_runs: Optional[list[dict]] = []
+
+def generate_initial_plan(request_id: str, department: str, role: str):
+    try:
+        supabase.table("onboarding_requests").update({"status": "processing_rules"}).eq("request_id", request_id).execute()
+
+        rules_res = (
+            supabase.table("product_assignment_rules")
+            .select(
+                "rule_id, access_level, is_mandatory, requires_approval, "
+                "software_products(product_id, name, vendor, license_type)"
+            )
+            .eq("department", department)
+            .eq("role", role)
+            .execute()
+        )
+
+        # Clear existing runs on retry to prevent stale duplicates
+        supabase.table("workflow_runs").delete().eq("request_id", request_id).execute()
+
+        # Insert fresh plan
+        supabase.table("workflow_runs").insert({
+            "request_id": request_id,
+            "suggested_licenses": rules_res.data,
+            "suggested_hardware": {},
+            "policy_citations": [],
+        }).execute()
+
+        supabase.table("onboarding_requests").update({"status": "generating_plan"}).eq("request_id", request_id).execute()
+    except Exception as e:
+        print(f"Error generating plan for {request_id}: {e}")
+        supabase.table("onboarding_requests").update({"status": "failed"}).eq("request_id", request_id).execute()
 
 def generate_employee_id() -> str:
     try:
@@ -91,7 +123,7 @@ def check_sb_connection():
         )
 
 @app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
-def create_onboarding_request(item: Request):
+def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
     try:
         employee_id = generate_employee_id()
         request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
@@ -111,6 +143,7 @@ def create_onboarding_request(item: Request):
             "status": "pending_onboarding"
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
+        background_tasks.add_task(generate_initial_plan, request_id, item.department, item.role)
 
         return {
             "status": "success", 
@@ -129,31 +162,33 @@ def create_onboarding_request(item: Request):
             },
         )
 
-@app.get("/onboarding/requests",response_model=list[DB_Request],status_code=status.HTTP_200_OK)
-def provide_requests(limit: int=10):
+@app.get("/onboarding/requests", response_model=list[DB_Request])
+def provide_requests(status: Optional[str] = None, limit: int = 20):
     try:
-        # Note: Match the status you set in create_onboarding_request ('pending_onboarding')
-        response = (
+        query = (
             supabase.table("onboarding_requests")
-            .select("*")
-            .eq("status", "pending_onboarding")
-            .order("created_at", desc=False)
+            .select("*, workflow_runs(*)")
+            .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
-        return response.data
-    except APIError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": err.message,
-                "code": err.code,
-                "details": err.details,
-                "hint": err.hint,
-            },
-        )
+        if status:
+            query = query.eq("status", status)
+        return query.execute().data
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve requests: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/onboarding/requests/{request_id}/generate-plan")
+def trigger_plan_generation(request_id: str):
+    req_res = (
+        supabase.table("onboarding_requests")
+        .select("department, role")
+        .eq("request_id", request_id)
+        .single()
+        .execute()
+    )
+    if not req_res.data:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    req = req_res.data
+    generate_initial_plan(request_id, req["department"], req["role"])
+    return {"status": "success", "message": f"Plan generated for {request_id}"}
