@@ -11,7 +11,7 @@ st.title("🛠️ IT Provisioning & Approvals")
 st.caption("Review pending access approvals and monitor active automation steps.")
 
 try:
-    res = requests.get(f"{API_URL}/onboarding/requests", timeout=5)
+    res = requests.get(f"{API_URL}/onboarding/requests", timeout=60)
     pending_tasks = res.json() if res.status_code == 200 else []
 except requests.exceptions.ConnectionError:
     st.error("Could not load pending tasks from backend.")
@@ -39,7 +39,7 @@ else:
                 btn_label = "🔄 Regenerate Plan" if has_plan else "⚙️ Generate Plan"
                 if st.button(btn_label, key=f"btn_gen_{req_id}", use_container_width=True):
                     try:
-                        gen_res = requests.post(f"{API_URL}/onboarding/requests/{req_id}/generate-plan", timeout=10)
+                        gen_res = requests.post(f"{API_URL}/onboarding/requests/{req_id}/generate-plan", timeout=60)
                         if gen_res.status_code == 200:
                             st.rerun()
                         else:

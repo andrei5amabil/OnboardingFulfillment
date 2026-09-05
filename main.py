@@ -7,6 +7,11 @@ from pydantic import BaseModel, EmailStr
 from supabase import create_client, Client
 from postgrest import APIError
 from datetime import date, datetime
+import json
+import ollama
+from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
+
+OLLAMA_MODEL = "gemma4:e4b"
 
 load_dotenv()
 
@@ -50,28 +55,47 @@ class DB_Request(BaseModel):
     workflow_runs: Optional[list[dict]] = []
 
 def deduplicate_rules(rules: list[dict]) -> list[dict]:
-    """Ensures role-specific rules override department or global defaults for the same product."""
+    """Ensures role-specific rules take precedence over department or global defaults."""
+
     def rule_priority(r: dict) -> int:
         if r.get("role"):
-            return 3  # Role-specific
+            return 3
         if r.get("department"):
-            return 2  # Department baseline
-        return 1      # Global baseline
+            return 2
+        return 1
 
-    # Sort so higher-priority rules come last, overwriting earlier ones in the dict
     sorted_rules = sorted(rules, key=rule_priority)
-    product_map = {
-        r["software_products"]["product_id"]: r 
-        for r in sorted_rules 
-        if r.get("software_products")
-    }
+    product_map = {}
+    for r in sorted_rules:
+        prod = r.get("software_products")
+        if prod and "product_id" in prod:
+            product_map[prod["product_id"]] = r
     return list(product_map.values())
 
 def generate_initial_plan(request_id: str, department: str, role: str):
     try:
-        supabase.table("onboarding_requests").update({"status": "processing_rules"}).eq("request_id", request_id).execute()
+        # 1. Update status to processing
+        supabase.table("onboarding_requests").update(
+            {"status": "processing_rules"}
+        ).eq("request_id", request_id).execute()
+
+        # 2. Fetch complete request context (work_location, notes, employee_id)
+        req_res = (
+            supabase.table("onboarding_requests")
+            .select("*")
+            .eq("request_id", request_id)
+            .single()
+            .execute()
+        )
+        if not req_res.data:
+            raise ValueError(
+                f"Onboarding request {request_id} not found in database"
+            )
+        candidate_data = req_res.data
+
+        # 3. Deterministic SQL rules lookup
         filter_query = (
-            f'department.is.null,'
+            f"department.is.null,"
             f'and(department.eq."{department}",role.is.null),'
             f'and(department.eq."{department}",role.eq."{role}")'
         )
@@ -85,22 +109,66 @@ def generate_initial_plan(request_id: str, department: str, role: str):
             .or_(filter_query)
             .execute()
         )
+        deduped_licenses = deduplicate_rules(rules_res.data or [])
 
-        # Clear existing runs on retry to prevent stale duplicates
-        supabase.table("workflow_runs").delete().eq("request_id", request_id).execute()
+        # 4. RAG Retrieval across governance policies
+        citations = retrieve_onboarding_policies(candidate_data)
 
-        # Insert fresh plan
-        supabase.table("workflow_runs").insert({
-            "request_id": request_id,
-            "suggested_licenses": deduplicate_rules(rules_res.data),
-            "suggested_hardware": {},
-            "policy_citations": [],
-        }).execute()
+        # 5. Build prompt and query local Ollama model with structured JSON enforcement
+        prompt = build_reasoning_prompt(
+            candidate_data, deduped_licenses, citations
+        )
 
-        supabase.table("onboarding_requests").update({"status": "generating_plan"}).eq("request_id", request_id).execute()
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.1},
+        )
+
+        ai_plan = json.loads(response["message"]["content"])
+
+        # 6. Extract structured sections or fallback safely
+        hardware_plan = ai_plan.get("hardware_provisioning", {})
+        flagged_exceptions = ai_plan.get("flagged_exceptions", [])
+        policy_tags = ai_plan.get("policy_citations", [])
+
+        # 7. Clear old run artifacts and commit fresh plan
+        supabase.table("workflow_runs").delete().eq(
+            "request_id", request_id
+        ).execute()
+
+        supabase.table("workflow_runs").insert(
+            {
+                "request_id": request_id,
+                "suggested_licenses": deduped_licenses,
+                "suggested_hardware": hardware_plan,
+                "policy_citations": [
+                    {
+                        "tags": policy_tags,
+                        "raw_citations": [
+                            {
+                                "code": c["policy_code"],
+                                "section": c["section_title"],
+                            }
+                            for c in citations
+                        ],
+                        "flagged_exceptions": flagged_exceptions,
+                    }
+                ],
+            }
+        ).execute()
+
+        # 8. Mark ready for IT Human-in-the-Loop review
+        supabase.table("onboarding_requests").update(
+            {"status": "pending_approval"}
+        ).eq("request_id", request_id).execute()
+
     except Exception as e:
         print(f"Error generating plan for {request_id}: {e}")
-        supabase.table("onboarding_requests").update({"status": "failed"}).eq("request_id", request_id).execute()
+        supabase.table("onboarding_requests").update({"status": "failed"}).eq(
+            "request_id", request_id
+        ).execute()
 
 def generate_employee_id() -> str:
     try:
