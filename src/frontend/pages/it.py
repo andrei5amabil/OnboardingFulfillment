@@ -7,9 +7,15 @@ from dotenv import load_dotenv
 load_dotenv()
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
-st.title("🛠️ IT Provisioning & Approvals")
-st.caption("Review pending access approvals and monitor active automation steps.")
+if "user_id" not in st.session_state:
+    st.session_state.user_id = "EMP-IT-01"
 
+st.title("🛠️ IT Provisioning & Approvals")
+st.caption("Review agent-generated access plans, request revisions, or commit deterministic provisioning.")
+col_title, col_ref = st.columns([4, 1])
+with col_ref:
+    if st.button("🔄 Refresh View", use_container_width=True):
+        st.rerun()
 try:
     res = requests.get(f"{API_URL}/onboarding/requests", timeout=60)
     pending_tasks = res.json() if res.status_code == 200 else []
@@ -19,6 +25,9 @@ except requests.exceptions.ConnectionError:
 
 if not pending_tasks:
     st.info("No actions awaiting IT approval.")
+for task in pending_tasks:
+    if task.get("status") == "completed":
+        pending_tasks.remove(task)
 else:
     for task in pending_tasks:
         req_id = task.get("request_id")
@@ -27,31 +36,24 @@ else:
         has_plan = len(runs) > 0
 
         with st.container(border=True):
-            col_info, col_action = st.columns([3, 1])
-
-            with col_info:
-                st.markdown(f"### {task.get('first_name')} {task.get('last_name')}")
-                st.write(f"**Request ID:** `{req_id}` | **Status:** `{current_status}`")
-                st.write(f"**Department:** {task.get('department')} | **Role:** {task.get('role')}")
-                st.write(f"**Work Location:** `{task.get('work_location')}`")
-
-            with col_action:
-                btn_label = "🔄 Regenerate Plan" if has_plan else "⚙️ Generate Plan"
-                if st.button(btn_label, key=f"btn_gen_{req_id}", use_container_width=True):
-                    try:
-                        gen_res = requests.post(f"{API_URL}/onboarding/requests/{req_id}/generate-plan", timeout=60)
-                        if gen_res.status_code == 200:
-                            st.rerun()
-                        else:
-                            st.error("Failed to generate plan.")
-                    except requests.exceptions.ConnectionError:
-                        st.error("Backend unreachable.")
+            st.markdown(f"### {task.get('first_name')} {task.get('last_name')}")
+            st.write(f"**Request ID:** `{req_id}` | **Status:** `{current_status}`")
+            st.write(f"**Department:** {task.get('department')} | **Role:** {task.get('role')}")
+            st.write(f"**Work Location:** `{task.get('work_location')}`")
 
             st.divider()
 
-            # Permanent plan view
             if current_status == "processing_rules":
-                st.spinner("Processing deterministic assignment rules...")
+                st.info("⏳ Agent is generating the plan and checking compliance policies (takes ~10-15s)...")
+                if st.button("🔄 Check Status", key=f"btn_check_{req_id}"):
+                    st.rerun()
+            elif current_status == "failed":
+                st.error("❌ Plan generation failed in the background.")
+                if st.button("🔄 Retry Plan Generation", key=f"btn_retry_{req_id}"):
+                    requests.post(f"{API_URL}/onboarding/requests/{req_id}/generate-plan", timeout=10)
+                    st.rerun()
+            elif current_status == "requires_manual_intervention":
+                st.error("🚨 Maximum revision attempts reached (3/3). This request requires manual IT handling.")
             elif has_plan:
                 plan = runs[0]
                 rules = plan.get("suggested_licenses", [])
@@ -71,11 +73,77 @@ else:
                         }
                         for r in rules
                     ]
-                    st.dataframe(pd.DataFrame(flattened), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(flattened), width='stretch', hide_index=True)
 
                 hardware = plan.get("suggested_hardware", {})
                 st.markdown("**💻 Suggested Hardware Provisioning**")
-                if not hardware:
-                    st.warning("No hardware provisioning rules found for this role and department.")
-            else:
-                st.info("No plan generated yet. Click 'Generate Plan' to trigger.")
+                if hardware:
+                    st.json(hardware)
+                else:
+                    st.warning("No hardware provisioning rules generated.")
+
+                citations = plan.get("policy_citations", [])
+                if citations:
+                    st.markdown("**🛡️ Policy Citations & Flags**")
+                    st.json(citations)
+
+                # --- HITL Review Actions ---
+                if current_status == "pending_approval":
+                    st.divider()
+                    st.markdown("#### ⚖️ IT Review Decision")
+
+                    feedback_note = st.text_area(
+                        "Revision Notes / Feedback (Required if regenerating)",
+                        key=f"note_{req_id}",
+                        placeholder="e.g., Provide 32GB RAM model instead; remove PowerBI Pro per contractor policy.",
+                    )
+
+                    col_regen, col_approve = st.columns(2)
+
+                    with col_regen:
+                        if st.button("🔄 Regenerate Plan", key=f"btn_regen_{req_id}", width='stretch'):
+                            with st.spinner("Requesting plan revision from agent..."):
+                                review_body = {
+                                    "action": "regenerate",
+                                    "note": feedback_note.strip(),
+                                    "reviewed_by": st.session_state.user_id,
+                                }
+                                review_res = requests.post(
+                                    f"{API_URL}/onboarding/requests/{req_id}/review",
+                                    json=review_body,
+                                    timeout=60,
+                                )
+                                if review_res.status_code == 200:
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to request revision: {review_res.json().get('detail')}")
+
+                    with col_approve:
+                        if st.button("🚀 Approve & Provision", key=f"btn_app_{req_id}", type="primary", width='stretch'):
+                            with st.spinner("Executing deterministic provisioning to database..."):
+                                review_body = {
+                                    "action": "approve",
+                                    "note": feedback_note.strip(),
+                                    "reviewed_by": st.session_state.user_id,
+                                }
+                                review_res = requests.post(
+                                    f"{API_URL}/onboarding/requests/{req_id}/review",
+                                    json=review_body,
+                                    timeout=30,
+                                )
+                                if review_res.status_code == 200:
+                                    st.success("Employee record and licenses provisioned successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Provisioning failed: {review_res.json().get('detail')}")
+            elif current_status == "pending_onboarding" and not has_plan:
+                st.warning("⚠️ Request intake received, but plan generation has not executed.")
+                if st.button("⚙️ Launch Agent Planner", key=f"btn_start_{req_id}", type="primary"):
+                    with st.spinner("Starting agent workflow..."):
+                        res = requests.post(f"{API_URL}/onboarding/requests/{req_id}/generate-plan", timeout=10)
+                        if res.status_code == 200:
+                            st.rerun()
+                        else:
+                            st.error("Failed to trigger agent.")
+            elif current_status == "completed":
+                st.success("✅ Provisioning finalized. Active employee and software records written to database.")

@@ -1,27 +1,28 @@
 import os
+from urllib import response
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, EmailStr
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body
+from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
 from postgrest import APIError
 from datetime import date, datetime
 import json
 import ollama
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
+import logging
+from src.agent.graph import onboarding_flow
+from langgraph.types import Command
+from src.db import supabase
+import traceback
 
 OLLAMA_MODEL = "gemma4:e4b"
 
 load_dotenv()
+logger = logging.getLogger("uvicorn.error")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the .env file.")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="FastAPI + Supabase Setup")
 
@@ -54,6 +55,42 @@ class DB_Request(BaseModel):
     status: str
     workflow_runs: Optional[list[dict]] = []
 
+class ReviewPayload(BaseModel):
+    action: Literal["approve", "regenerate"]
+    note: Optional[str] = ""
+    reviewed_by: Optional[str] = "IT_ADMIN"
+
+def kickoff_agent_workflow(request_id: str, *args, **kwargs):
+    """Initializes and runs the graph until the approval gate interrupt."""
+    logger.info("▶️ [Agent Workflow] Starting generation for %s", request_id)
+    config = {"configurable": {"thread_id": request_id}}
+    initial_state = {
+        "request_id": request_id,
+        "employee_id": "",
+        "candidate_data": {},
+        "sql_rules": [],
+        "citations": [],
+        "suggested_licenses": [],
+        "suggested_hardware": {},
+        "policy_tags": [],
+        "flagged_exceptions": [],
+        "attempt_count": 1,
+        "it_feedback": [],
+        "review_action": None,
+        "reviewed_by": None,
+        "is_approved": False,
+        "status": "processing_rules",
+    }
+    try:
+        onboarding_flow.invoke(initial_state, config=config)
+        logger.info("⏸️ [Agent Workflow] Paused at approval gate for %s", request_id)
+    except Exception as e:
+        logger.error("❌ [Agent Workflow] Crashed for %s: %s", request_id, str(e))
+        logger.error(traceback.format_exc())
+        supabase.table("onboarding_requests").update(
+            {"status": "failed"}
+        ).eq("request_id", request_id).execute()
+
 def deduplicate_rules(rules: list[dict]) -> list[dict]:
     """Ensures role-specific rules take precedence over department or global defaults."""
 
@@ -71,104 +108,6 @@ def deduplicate_rules(rules: list[dict]) -> list[dict]:
         if prod and "product_id" in prod:
             product_map[prod["product_id"]] = r
     return list(product_map.values())
-
-def generate_initial_plan(request_id: str, department: str, role: str):
-    try:
-        # 1. Update status to processing
-        supabase.table("onboarding_requests").update(
-            {"status": "processing_rules"}
-        ).eq("request_id", request_id).execute()
-
-        # 2. Fetch complete request context (work_location, notes, employee_id)
-        req_res = (
-            supabase.table("onboarding_requests")
-            .select("*")
-            .eq("request_id", request_id)
-            .single()
-            .execute()
-        )
-        if not req_res.data:
-            raise ValueError(
-                f"Onboarding request {request_id} not found in database"
-            )
-        candidate_data = req_res.data
-
-        # 3. Deterministic SQL rules lookup
-        filter_query = (
-            f"department.is.null,"
-            f'and(department.eq."{department}",role.is.null),'
-            f'and(department.eq."{department}",role.eq."{role}")'
-        )
-
-        rules_res = (
-            supabase.table("product_assignment_rules")
-            .select(
-                "rule_id, access_level, is_mandatory, requires_approval, "
-                "software_products(product_id, name, vendor, license_type)"
-            )
-            .or_(filter_query)
-            .execute()
-        )
-        deduped_licenses = deduplicate_rules(rules_res.data or [])
-
-        # 4. RAG Retrieval across governance policies
-        citations = retrieve_onboarding_policies(candidate_data)
-
-        # 5. Build prompt and query local Ollama model with structured JSON enforcement
-        prompt = build_reasoning_prompt(
-            candidate_data, deduped_licenses, citations
-        )
-
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            format="json",
-            options={"temperature": 0.1},
-        )
-
-        ai_plan = json.loads(response["message"]["content"])
-
-        # 6. Extract structured sections or fallback safely
-        hardware_plan = ai_plan.get("hardware_provisioning", {})
-        flagged_exceptions = ai_plan.get("flagged_exceptions", [])
-        policy_tags = ai_plan.get("policy_citations", [])
-
-        # 7. Clear old run artifacts and commit fresh plan
-        supabase.table("workflow_runs").delete().eq(
-            "request_id", request_id
-        ).execute()
-
-        supabase.table("workflow_runs").insert(
-            {
-                "request_id": request_id,
-                "suggested_licenses": deduped_licenses,
-                "suggested_hardware": hardware_plan,
-                "policy_citations": [
-                    {
-                        "tags": policy_tags,
-                        "raw_citations": [
-                            {
-                                "code": c["policy_code"],
-                                "section": c["section_title"],
-                            }
-                            for c in citations
-                        ],
-                        "flagged_exceptions": flagged_exceptions,
-                    }
-                ],
-            }
-        ).execute()
-
-        # 8. Mark ready for IT Human-in-the-Loop review
-        supabase.table("onboarding_requests").update(
-            {"status": "pending_approval"}
-        ).eq("request_id", request_id).execute()
-
-    except Exception as e:
-        print(f"Error generating plan for {request_id}: {e}")
-        supabase.table("onboarding_requests").update({"status": "failed"}).eq(
-            "request_id", request_id
-        ).execute()
 
 def generate_employee_id() -> str:
     try:
@@ -217,6 +156,8 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
     try:
         employee_id = generate_employee_id()
         request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
+        
+        # 1. Insert directly in 'processing_rules' so the UI immediately shows active progress
         db_item = {
             "request_id": request_id,
             "employee_id": employee_id,
@@ -230,18 +171,19 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
             "work_location": item.work_location,
             "notes": item.notes,
             "hr_manager_id": item.hr_manager_id,
-            "status": "pending_onboarding"
+            "status": "processing_rules",
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
-        background_tasks.add_task(generate_initial_plan, request_id, item.department, item.role)
+        
+        # 2. Queue the single-parameter agent workflow
+        background_tasks.add_task(kickoff_agent_workflow, request_id)
 
         return {
-            "status": "success", 
-            "message": "Onboarding request created.", 
-            "data": response.data[0]
+            "status": "success",
+            "message": "Onboarding request created and agent initialized.",
+            "data": response.data[0],
         }
     except APIError as err:
-        # err contains details, message, code, and hint from PostgREST
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -267,18 +209,126 @@ def provide_requests(status: Optional[str] = None, limit: int = 20):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/onboarding/requests/{request_id}/generate-plan")
-def trigger_plan_generation(request_id: str):
-    req_res = (
-        supabase.table("onboarding_requests")
-        .select("department, role")
-        .eq("request_id", request_id)
-        .single()
-        .execute()
-    )
-    if not req_res.data:
-        raise HTTPException(status_code=404, detail="Request not found")
+@app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
+def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
+    try:
+        employee_id = generate_employee_id()
+        request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
+        db_item = {
+            "request_id": request_id,
+            "employee_id": employee_id,
+            "first_name": item.first_name,
+            "last_name": item.last_name,
+            "department": item.department,
+            "role": item.role,
+            "start_date": item.start_date,
+            "employment_type": item.employment_type,
+            "location": item.location,
+            "work_location": item.work_location,
+            "notes": item.notes,
+            "hr_manager_id": item.hr_manager_id,
+            "status": "pending_onboarding",
+        }
+        response = supabase.table("onboarding_requests").insert(db_item).execute()
+        
+        # Hand full plan generation directly to the agent
+        background_tasks.add_task(kickoff_agent_workflow, request_id)
 
-    req = req_res.data
-    generate_initial_plan(request_id, req["department"], req["role"])
-    return {"status": "success", "message": f"Plan generated for {request_id}"}
+        return {
+            "status": "success",
+            "message": "Onboarding request created and agent initialized.",
+            "data": response.data[0],
+        }
+    except APIError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": err.message,
+                "code": err.code,
+                "details": err.details,
+                "hint": err.hint,
+            },
+        )
+
+@app.post("/onboarding/requests/{request_id}/generate-plan")
+def trigger_plan_generation(request_id: str, background_tasks: BackgroundTasks):
+    """Manual fallback to initiate or retry plan generation."""
+    supabase.table("onboarding_requests").update(
+        {"status": "processing_rules"}
+    ).eq("request_id", request_id).execute()
+
+    background_tasks.add_task(kickoff_agent_workflow, request_id)
+    return {"status": "success", "message": f"Plan generation queued for {request_id}"}
+    
+@app.post("/onboarding/requests/{request_id}/review")
+def review_onboarding_plan(request_id: str, payload: ReviewPayload):
+    """Resumes the workflow, rehydrating from Supabase if thread state was lost in memory."""
+    config = {"configurable": {"thread_id": request_id}}
+    state_snapshot = onboarding_flow.get_state(config)
+
+    # If server restarted or request was generated in another process, rehydrate from DB
+    if not state_snapshot.tasks:
+        req_res = (
+            supabase.table("onboarding_requests")
+            .select("*")
+            .eq("request_id", request_id)
+            .single()
+            .execute()
+        )
+        if not req_res.data:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        run_res = (
+            supabase.table("workflow_runs")
+            .select("*")
+            .eq("request_id", request_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        run_data = run_res.data[0] if run_res.data else {}
+
+        reconstructed_state = {
+            "request_id": request_id,
+            "employee_id": req_res.data["employee_id"],
+            "candidate_data": req_res.data,
+            "sql_rules": run_data.get("suggested_licenses", []),
+            "suggested_licenses": run_data.get("suggested_licenses", []),
+            "suggested_hardware": run_data.get("suggested_hardware", {}),
+            "policy_tags": [],
+            "flagged_exceptions": [],
+            "citations": [],
+            "attempt_count": 1,
+            "it_feedback": [payload.note] if payload.note else [],
+            "review_action": payload.action,
+            "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+            "is_approved": (payload.action == "approve"),
+            "status": "approved" if payload.action == "approve" else "revision_requested",
+        }
+
+        # Inject state directly as human_approval_gate so the conditional edge routes immediately
+        onboarding_flow.update_state(
+            config,
+            reconstructed_state,
+            as_node="human_approval_gate",
+        )
+        final_state = onboarding_flow.invoke(None, config=config)
+
+    else:
+        # Standard in-memory resume
+        final_state = onboarding_flow.invoke(
+            Command(
+                resume={
+                    "action": payload.action,
+                    "note": payload.note or "",
+                    "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+                }
+            ),
+            config=config,
+        )
+
+    return {
+        "status": "success",
+        "action": payload.action,
+        "workflow_status": final_state.get("status"),
+    }

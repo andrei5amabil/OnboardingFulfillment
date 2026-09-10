@@ -11,6 +11,7 @@ dependencies = [
     "chromadb>=1.5.9",
     "fastapi[standard]>=0.141.1",
     "langchain-text-splitters>=1.1.2",
+    "langgraph>=1.2.11",
     "ollama>=0.6.2",
     "python-dotenv>=1.2.2",
     "rank-bm25>=0.2.2",

@@ -1,12 +1,16 @@
 from typing import Any
 from src.rag.retriever import PolicyRetriever
+import threading
 
 retriever = None
+_retriever_lock = threading.Lock()
 
 def get_retriever():
     global retriever
     if retriever is None:
-        retriever = PolicyRetriever()
+        with _retriever_lock:
+            if retriever is None:
+                retriever = PolicyRetriever()
     return retriever
 
 def retrieve_onboarding_policies(req: dict[str, Any]) -> list[dict[str, Any]]:
