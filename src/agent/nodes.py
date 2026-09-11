@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 import ollama
 from pydantic import BaseModel, Field, ValidationError
 
@@ -11,10 +12,13 @@ from src.agent.state import OnboardingState
 from src.db.client import supabase
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
 from langgraph.types import interrupt
+from pathlib import Path
 
+env_path = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 logger = logging.getLogger("uvicorn.error")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:e4b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite4.2:3b")
 
 # --- Pydantic Output Schemas ---
 

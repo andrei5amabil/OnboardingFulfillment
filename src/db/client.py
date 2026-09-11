@@ -2,8 +2,10 @@
 import os
 from dotenv import load_dotenv
 from supabase import Client, create_client
+from pathlib import Path
 
-load_dotenv()
+env_path = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
