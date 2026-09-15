@@ -89,24 +89,6 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
             {"status": "failed"}
         ).eq("request_id", request_id).execute()
 
-def deduplicate_rules(rules: list[dict]) -> list[dict]:
-    """Ensures role-specific rules take precedence over department or global defaults."""
-
-    def rule_priority(r: dict) -> int:
-        if r.get("role"):
-            return 3
-        if r.get("department"):
-            return 2
-        return 1
-
-    sorted_rules = sorted(rules, key=rule_priority)
-    product_map = {}
-    for r in sorted_rules:
-        prod = r.get("software_products")
-        if prod and "product_id" in prod:
-            product_map[prod["product_id"]] = r
-    return list(product_map.values())
-
 def generate_employee_id() -> str:
     try:
         #res = supabase.table("employees").select("employee_id").order("created_at", desc=True).limit(1).execute()
@@ -155,7 +137,6 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
         employee_id = generate_employee_id()
         request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
         
-        # 1. Insert directly in 'processing_rules' so the UI immediately shows active progress
         db_item = {
             "request_id": request_id,
             "employee_id": employee_id,
@@ -173,7 +154,6 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
         
-        # 2. Queue the single-parameter agent workflow
         background_tasks.add_task(kickoff_agent_workflow, request_id)
 
         return {
@@ -206,47 +186,6 @@ def provide_requests(status: Optional[str] = None, limit: int = 20):
         return query.execute().data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
-def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
-    try:
-        employee_id = generate_employee_id()
-        request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
-        db_item = {
-            "request_id": request_id,
-            "employee_id": employee_id,
-            "first_name": item.first_name,
-            "last_name": item.last_name,
-            "department": item.department,
-            "role": item.role,
-            "start_date": item.start_date,
-            "employment_type": item.employment_type,
-            "location": item.location,
-            "work_location": item.work_location,
-            "notes": item.notes,
-            "hr_manager_id": item.hr_manager_id,
-            "status": "pending_onboarding",
-        }
-        response = supabase.table("onboarding_requests").insert(db_item).execute()
-        
-        # Hand full plan generation directly to the agent
-        background_tasks.add_task(kickoff_agent_workflow, request_id)
-
-        return {
-            "status": "success",
-            "message": "Onboarding request created and agent initialized.",
-            "data": response.data[0],
-        }
-    except APIError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": err.message,
-                "code": err.code,
-                "details": err.details,
-                "hint": err.hint,
-            },
-        )
 
 @app.post("/onboarding/requests/{request_id}/generate-plan")
 def trigger_plan_generation(request_id: str, background_tasks: BackgroundTasks):

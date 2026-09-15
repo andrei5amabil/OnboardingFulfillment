@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Agent Visualizer</title>
+    
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Custom Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        /* Extra styling to ensure SVG fits well */
+        .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 text-slate-800">
+
+    <div class="max-w-5xl w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+        <!-- Header -->
+        <div class="bg-slate-900 px-8 py-6 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-bold text-white tracking-tight">Onboarding Agent Architecture</h1>
+                <p class="text-slate-400 mt-1 text-sm font-medium">LangGraph Human-in-the-Loop Workflow</p>
+            </div>
+            <div class="flex items-center space-x-2 text-xs font-semibold px-3 py-1 bg-slate-800 text-slate-300 rounded-full border border-slate-700">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Active Graph</span>
+            </div>
+        </div>
+
+        <!-- Content/Graph Area -->
+        <div class="p-8 md:p-12 overflow-x-auto bg-slate-50 flex justify-center">
+            
+            <!-- Mermaid Graph Definition -->
+            <pre class="mermaid">
+                %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'lineColor': '#64748b', 'fontFamily': 'Inter'}}}%%
+                graph TD
+                    %% Define Node Styles
+                    classDef startEnd fill:#10b981,stroke:#059669,stroke-width:2px,color:#fff,font-weight:bold,rx:100,ry:100;
+                    classDef standard fill:#ffffff,stroke:#3b82f6,stroke-width:2px,color:#1e293b,rx:8,ry:8;
+                    classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#92400e,rx:4,ry:4;
+                    classDef terminal fill:#ef4444,stroke:#b91c1c,stroke-width:2px,color:#fff,font-weight:bold,rx:100,ry:100;
+
+                    %% Node Definitions
+                    START((START)):::startEnd
+                    END((END)):::terminal
+                    
+                    fetch_context[fetch_context]:::standard
+                    policy_rag[policy_rag]:::standard
+                    llm_planning[llm_planning]:::standard
+                    persist_plan[persist_plan]:::standard
+                    
+                    human_approval_gate{human_approval_gate}:::decision
+                    
+                    handle_max_retries[handle_max_retries]:::standard
+                    provision_employee[provision_employee]:::standard
+                    assign_licenses[assign_licenses]:::standard
+                    finalize_workflow[finalize_workflow]:::standard
+
+                    %% Core Linear Flow
+                    START --> fetch_context
+                    fetch_context --> policy_rag
+                    policy_rag --> llm_planning
+                    llm_planning --> persist_plan
+                    persist_plan --> human_approval_gate
+                    
+                    %% Conditional Routing (from approval gate)
+                    human_approval_gate -- "is_approved" --> provision_employee
+                    human_approval_gate -- "regenerate <= 3\n(cycle back)" --> llm_planning
+                    human_approval_gate -- "max_retries / other" --> handle_max_retries
+                    
+                    %% Deterministic Terminations
+                    provision_employee --> assign_licenses
+                    assign_licenses --> finalize_workflow
+                    finalize_workflow --> END
+                    handle_max_retries --> END
+            </pre>
+        </div>
+
+        <!-- Legend -->
+        <div class="bg-white border-t border-slate-200 p-4 px-8 text-sm flex flex-wrap gap-4 items-center justify-center text-slate-600">
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 rounded-full bg-emerald-500 border border-emerald-600"></div>
+                <span>Start Point</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 rounded bg-white border-2 border-blue-500"></div>
+                <span>Standard Node</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 transform rotate-45 bg-amber-100 border-2 border-amber-600"></div>
+                <span>Decision / Conditional Edge</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 rounded-full bg-red-500 border border-red-600"></div>
+                <span>End Point</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Mermaid JS -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        // Initialize Mermaid with interactive zoom/pan capabilities (optional but nice to have)
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            securityLevel: 'loose',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis' // Smooth, curving lines
+            }
+        });
+    </script>
+</body>
+</html>

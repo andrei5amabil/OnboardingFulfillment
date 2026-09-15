@@ -19,4 +19,3 @@ class OnboardingState(TypedDict):
     attempt_count: int
     it_feedback: Optional[list[str]]
     review_action: Optional[str]
-    is_approved: bool

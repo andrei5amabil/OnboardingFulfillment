@@ -27,10 +27,8 @@ except requests.exceptions.ConnectionError:
 
 if not pending_tasks:
     st.info("No actions awaiting IT approval.")
-for task in pending_tasks:
-    if task.get("status") == "completed":
-        pending_tasks.remove(task)
 else:
+    pending_tasks = [task for task in pending_tasks if task.get("status") != "completed"]
     for task in pending_tasks:
         req_id = task.get("request_id")
         runs = task.get("workflow_runs") or []
@@ -97,7 +95,7 @@ else:
                     feedback_note = st.text_area(
                         "Revision Notes / Feedback (Required if regenerating)",
                         key=f"note_{req_id}",
-                        placeholder="e.g., Provide 32GB RAM model instead; remove PowerBI Pro per contractor policy.",
+                        placeholder="e.g., Provide 32GB RAM model instead",
                     )
 
                     col_regen, col_approve = st.columns(2)

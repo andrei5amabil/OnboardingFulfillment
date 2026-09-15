@@ -260,7 +260,7 @@ def assign_licenses_node(state: OnboardingState) -> dict[str, Any]:
                 "employee_id": emp_id,
                 "product_id": prod_id,
                 "status": "active",
-                "assigned_at": datetime.utcnow().isoformat(),
+                "assigned_at": datetime.now().isoformat(),
             }
         )
 
@@ -280,7 +280,7 @@ def finalize_workflow_node(state: OnboardingState) -> dict[str, Any]:
     supabase.table("workflow_runs").update(
         {
             "reviewed_by": reviewer,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now().isoformat(),
         }
     ).eq("request_id", request_id).execute()
 
