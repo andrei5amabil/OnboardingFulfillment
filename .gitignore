@@ -13,3 +13,4 @@ wheels/
 src/frontend/.env
 
 node_modules/
+chroma_db/

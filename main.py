@@ -91,19 +91,32 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
 
 def generate_employee_id() -> str:
     try:
-        #res = supabase.table("employees").select("employee_id").order("created_at", desc=True).limit(1).execute()
-        req = supabase.table("onboarding_requests").select("employee_id").order("created_at", desc=True).limit(1).execute()
-
-        #if (res.data and len(res.data) > 0 and res.data[0].get("employee_id") and 
+        req = supabase.table("employees").select("employee_id").order("created_at", desc=True).limit(1).execute()
         if req.data and len(req.data) > 0 and req.data[0].get("employee_id"):
             last_id = req.data[0]["employee_id"]
-            last_num = int(last_id.split("-")[1])
-            new_id_num = last_num + 1
-        else:
-            new_id_num = 1
-        return f"EMP-{new_id_num:04d}"
+            last_num_emp = int(last_id.split("-")[1])
+        
+        new_id_num = last_num_emp + 1
+        return f"EMP-{new_id_num:08d}"
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating employee ID: {str(e)}")
+
+def verify_request_exists(request_id: str) -> bool:
+    """Helper function to check if a request exists in the database."""
+    res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).execute()
+    if res.data and len(res.data) > 0:
+        return True
+    return False
+
+def employee_exists(first_name: str, last_name: str) -> tuple[bool, str]:
+    """Helper function to check if an employee already exists in the database."""
+    res = supabase.table("onboarding_requests").select("*").eq("first_name", first_name).eq("last_name", last_name).execute()
+    if res.data and len(res.data) > 0:
+        return (True, "onboarding_requests")
+    res = supabase.table("employees").select("*").eq("first_name", first_name).eq("last_name", last_name).execute()
+    if res.data and len(res.data) > 0:
+        return (True, "employees")
+    return (False, "")
 
 @app.get("/health/supabase")
 def check_sb_connection():
@@ -135,8 +148,23 @@ def check_sb_connection():
 def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
     try:
         employee_id = generate_employee_id()
-        request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
-        
+        while True:
+            request_id = f"ONB-{uuid.uuid4().hex[:8].upper()}"
+            if not verify_request_exists(request_id):
+                break
+
+        is_employee, table_name = employee_exists(item.first_name, item.last_name)
+        if is_employee:
+            if table_name == "onboarding_requests":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"An onboarding request for {item.first_name} {item.last_name} already exists.",
+                )
+            elif table_name == "employees":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"An employee record for {item.first_name} {item.last_name} already exists. If this is intentional, add a digit to the name to differentiate (e.g., John Doe 2).",
+                )   
         db_item = {
             "request_id": request_id,
             "employee_id": employee_id,
