@@ -57,6 +57,7 @@ else:
             elif has_plan:
                 plan = runs[0]
                 rules = plan.get("suggested_licenses", [])
+                discretionary = plan.get("discretionary_licenses", [])
 
                 st.markdown("**📋 Deterministic Entitlement Plan (SQL Rules)**")
                 if not rules:
@@ -74,6 +75,22 @@ else:
                         for r in rules
                     ]
                     st.dataframe(pd.DataFrame(flattened), width='stretch', hide_index=True)
+
+                selected_disc_ids = []
+                if discretionary:
+                    st.markdown("**💡 AI Discretionary Recommendations (Based on Notes)**")
+                    for item in discretionary:
+                        pid = item.get("product_id")
+                        pname = item.get("name")
+                        justification = item.get("justification", "No justification provided.")
+
+                        checked = st.checkbox(
+                            f"**{pname}** (`{pid}`) — *{justification}*",
+                            value=True,
+                            key=f"disc_{req_id}_{pid}",
+                        )
+                        if checked:
+                            selected_disc_ids.append(pid)
 
                 hardware = plan.get("suggested_hardware", {})
                 st.markdown("**💻 Suggested Hardware Provisioning**")
@@ -107,6 +124,7 @@ else:
                                     "action": "regenerate",
                                     "note": feedback_note.strip(),
                                     "reviewed_by": st.session_state.user_id,
+                                    "approved_discretionary_ids": selected_disc_ids
                                 }
                                 review_res = requests.post(
                                     f"{API_URL}/onboarding/requests/{req_id}/review",
@@ -125,6 +143,7 @@ else:
                                     "action": "approve",
                                     "note": feedback_note.strip(),
                                     "reviewed_by": st.session_state.user_id,
+                                    "approved_discretionary_ids": selected_disc_ids
                                 }
                                 review_res = requests.post(
                                     f"{API_URL}/onboarding/requests/{req_id}/review",

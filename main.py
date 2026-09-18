@@ -57,6 +57,7 @@ class ReviewPayload(BaseModel):
     action: Literal["approve", "regenerate"]
     note: Optional[str] = ""
     reviewed_by: Optional[str] = "IT_ADMIN"
+    approved_discretionary_ids: list[str] = Field(default_factory=list)
 
 def kickoff_agent_workflow(request_id: str, *args, **kwargs):
     """Initializes and runs the graph until the approval gate interrupt."""
@@ -231,69 +232,66 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
     config = {"configurable": {"thread_id": request_id}}
     state_snapshot = onboarding_flow.get_state(config)
 
-    # If server restarted or request was generated in another process, rehydrate from DB
-    if not state_snapshot.tasks:
-        req_res = (
-            supabase.table("onboarding_requests")
-            .select("*")
-            .eq("request_id", request_id)
-            .single()
-            .execute()
-        )
-        if not req_res.data:
-            raise HTTPException(status_code=404, detail="Request not found")
-
-        run_res = (
-            supabase.table("workflow_runs")
-            .select("*")
-            .eq("request_id", request_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        run_data = run_res.data[0] if run_res.data else {}
-
-        reconstructed_state = {
-            "request_id": request_id,
-            "employee_id": req_res.data["employee_id"],
-            "candidate_data": req_res.data,
-            "sql_rules": run_data.get("suggested_licenses", []),
-            "suggested_licenses": run_data.get("suggested_licenses", []),
-            "suggested_hardware": run_data.get("suggested_hardware", {}),
-            "policy_tags": [],
-            "flagged_exceptions": [],
-            "citations": [],
-            "attempt_count": 1,
-            "it_feedback": [payload.note] if payload.note else [],
-            "review_action": payload.action,
-            "reviewed_by": payload.reviewed_by or "IT_ADMIN",
-            "is_approved": (payload.action == "approve"),
-            "status": "approved" if payload.action == "approve" else "revision_requested",
-        }
-
-        # Inject state directly as human_approval_gate so the conditional edge routes immediately
-        onboarding_flow.update_state(
-            config,
-            reconstructed_state,
-            as_node="human_approval_gate",
-        )
-        final_state = onboarding_flow.invoke(None, config=config)
-
-    else:
-        # Standard in-memory resume
-        final_state = onboarding_flow.invoke(
-            Command(
-                resume={
-                    "action": payload.action,
-                    "note": payload.note or "",
-                    "reviewed_by": payload.reviewed_by or "IT_ADMIN",
-                }
-            ),
-            config=config,
-        )
-
-    return {
-        "status": "success",
+    resume_data = {
         "action": payload.action,
-        "workflow_status": final_state.get("status"),
+        "note": payload.note or "",
+        "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+        "approved_discretionary_ids": payload.approved_discretionary_ids,
     }
+
+    try:
+        if not state_snapshot.tasks:
+            req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
+            if not req_res.data:
+                raise HTTPException(status_code=404, detail="Request not found")
+
+            run_res = (
+                supabase.table("workflow_runs")
+                .select("*")
+                .eq("request_id", request_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            run_data = run_res.data[0] if run_res.data else {}
+
+            catalog_res = (
+                supabase.table("software_products")
+                .select("name, vendor, license_type, requires_approval, product_id")
+                .execute()
+            )
+            software_catalog = catalog_res.data or []
+
+            reconstructed_state = {
+                "request_id": request_id,
+                "employee_id": req_res.data["employee_id"],
+                "candidate_data": req_res.data,
+                "sql_rules": run_data.get("suggested_licenses", []),
+                "suggested_licenses": run_data.get("suggested_licenses", []),
+                "discretionary_licenses": run_data.get("discretionary_licenses", []),
+                "software_catalog": software_catalog,
+                "approved_discretionary_ids": payload.approved_discretionary_ids,
+                "suggested_hardware": run_data.get("suggested_hardware", {}),
+                "policy_tags": [],
+                "flagged_exceptions": [],
+                "citations": [],
+                "attempt_count": 1,
+                "it_feedback": [payload.note] if payload.note else [],
+                "review_action": payload.action,
+                "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+                "is_approved": (payload.action == "approve"),
+                "status": "approved" if payload.action == "approve" else "revision_requested",
+            }
+            onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
+            final_state = onboarding_flow.invoke(None, config=config)
+        else:
+            final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+
+        return {
+            "status": "success",
+            "action": payload.action,
+            "workflow_status": final_state.get("status"),
+        }
+    except Exception as e:
+        logger.error("Review processing failed for %s: %s", request_id, e)
+        raise HTTPException(status_code=500, detail=str(e))

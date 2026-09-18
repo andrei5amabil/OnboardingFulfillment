@@ -3,6 +3,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import Any, Optional
+import json
 
 from dotenv import load_dotenv
 import ollama
@@ -23,15 +24,40 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite4.2:3b")
 # --- Pydantic Output Schemas ---
 
 class HardwarePlan(BaseModel):
-    laptop: Optional[str] = None
-    peripherals: list[str] = Field(default_factory=list)
-    shipping_required: bool = False
+    laptop: Optional[str] = Field(
+        default=None,
+        description="Recommended laptop tier/model (e.g., 'MacBook Pro 16\" / Dell XPS 15 (Dev Tier)' or 'ThinkPad T14 (Standard Tier)')",
+    )
+    peripherals: list[str] = Field(
+        default_factory=list,
+        description="List of required equipment/peripherals (e.g., 'Dual 27\" Monitors', 'USB-C Dock', 'YubiKey 5C NFC', 'Ergonomic Keyboard')",
+    )
+    shipping_required: bool = Field(
+        default=False,
+        description="Set to true if candidate work_location is 'remote' or requires home delivery; false if onsite.",
+    )
 
+class DiscretionaryLicenseProposal(BaseModel):
+    product_id: str = Field(
+        description="The exact product_id from the AVAILABLE SOFTWARE CATALOG (e.g., 'PRD-001')."
+    )
+    justification: str = Field(
+        description="Concise rationale explaining why candidate notes or project tasks require this specific software."
+    )
+
+class DiscretionaryListOutput(BaseModel):
+    discretionary_licenses: list[DiscretionaryLicenseProposal] = Field(default_factory=list)
 
 class OnboardingPlanOutput(BaseModel):
     hardware_provisioning: HardwarePlan
-    flagged_exceptions: list[str] = Field(default_factory=list)
-    policy_citations: list[str] = Field(default_factory=list)
+    flagged_exceptions: list[str] = Field(
+        default_factory=list,
+        description="Any policy violations, security flags, or non-standard requirements requiring IT intervention.",
+    )
+    policy_citations: list[str] = Field(
+        default_factory=list,
+        description="List of policy clause tags or document codes referenced (e.g., ['POL-SEC-01', 'HARDWARE-STD-02']).",
+    )
 
 
 # --- Helper Functions ---
@@ -98,11 +124,19 @@ def fetch_context_node(state: OnboardingState) -> dict[str, Any]:
     )
     deduped_licenses = deduplicate_rules(rules_res.data or [])
 
+    catalog_res = (
+        supabase.table("software_products")
+        .select("name, vendor, license_type, requires_approval, product_id")
+        .execute()
+    )
+    software_catalog = catalog_res.data or []
+
     return {
         "candidate_data": candidate_data,
         "employee_id": candidate_data["employee_id"],
         "sql_rules": deduped_licenses,
         "suggested_licenses": deduped_licenses,
+        "software_catalog": software_catalog,
         "status": "processing_rules",
     }
 
@@ -123,24 +157,43 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
         state["citations"],
     )
 
-    # Append revision context from previous rejection attempts
     if feedback:
-        formatted_feedback = "\n".join(f"- Attempt #{i+1} IT Feedback: {note}" for i, note in enumerate(feedback))
-        prompt += f"\n\n### IT REVIEWER REVISION REQUESTS\n{formatted_feedback}\nAdjust the output strictly to satisfy this feedback."
-
-    response = ollama.chat(
-        model=OLLAMA_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        format=OnboardingPlanOutput.model_json_schema(),
-        options={"temperature": 0.1},
-    )
+        formatted_feedback = "\n".join(
+            f"- Attempt #{i+1} IT Feedback: {note}" for i, note in enumerate(feedback)
+        )
+        prompt += f"\n\n### IT REVIEWER REVISION REQUESTS (HARDWARE / POLICIES)\n{formatted_feedback}\nAdjust the hardware and shipping configuration strictly to satisfy this feedback."
 
     try:
-        validated_plan = OnboardingPlanOutput.model_validate_json(
-            response["message"]["content"]
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            format=OnboardingPlanOutput.model_json_schema(),
+            options={"temperature": 0.1, "num_ctx": 4096},
         )
+        raw_content = response.get("message", {}).get("content", "").strip()
+    except Exception as e:
+        logger.warning("Grammar-constrained inference failed (%s). Falling back to generic JSON mode.", e)
+        raw_content = ""
+
+    # Fallback to generic JSON if grammar fails or returns empty
+    if not raw_content:
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"{prompt}\n\nRespond strictly with a JSON object matching keys: 'hardware_provisioning', 'flagged_exceptions', 'policy_citations'.",
+                }
+            ],
+            format="json",
+            options={"temperature": 0.1, "num_ctx": 4096},
+        )
+        raw_content = response.get("message", {}).get("content", "").strip()
+
+    try:
+        validated_plan = OnboardingPlanOutput.model_validate_json(raw_content)
     except ValidationError as ve:
-        logger.error("LLM JSON schema mismatch: %s", ve.json())
+        logger.error("Hardware planning schema validation failed: %s\nRaw output: %s", ve.json(), raw_content)
         raise ve
 
     ai_plan = validated_plan.model_dump()
@@ -163,6 +216,7 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
             "request_id": request_id,
             "suggested_licenses": state["suggested_licenses"],
             "suggested_hardware": state["suggested_hardware"],
+            "discretionary_licenses": state.get("discretionary_licenses", []),
             "policy_citations": [
                 {
                     "tags": state["policy_tags"],
@@ -185,6 +239,116 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
 
     return {"status": "pending_approval"}
 
+def discretionary_licensing_node(state: OnboardingState) -> dict[str, Any]:
+    """Analyzes candidate notes against available catalog in isolation."""
+    cand = state.get("candidate_data", {})
+    notes = (cand.get("notes") or "").strip()
+    feedback = state.get("it_feedback", [])
+    catalog = state.get("software_catalog", [])
+    sql_rules = state.get("sql_rules", [])
+
+    print("\n" + "=" * 50)
+    print("🔍 [DEBUG: discretionary_licensing_node] INPUT STATE:")
+    print(f"  - Request ID: {state.get('request_id')}")
+    print(f"  - Notes: '{notes}'")
+    print(f"  - IT Feedback: {feedback}")
+    print(f"  - Catalog items loaded: {len(catalog)}")
+    print(f"  - SQL Rules (Baseline assigned): {len(sql_rules)}")
+
+    # Safety Fallback: Re-fetch catalog if missing from rehydrated state
+    if not catalog:
+        print("⚠️ [DEBUG] software_catalog was EMPTY in state! Fetching directly from DB...")
+        cat_res = supabase.table("software_products").select("name, vendor, license_type, requires_approval, product_id").execute()
+        catalog = cat_res.data or []
+        print(f"  - Recovered {len(catalog)} catalog items from Supabase.")
+
+    # Check fast path
+    if not notes and not feedback:
+        print("🛑 [DEBUG] Fast path exit: Both 'notes' and 'it_feedback' are empty. Returning [].")
+        print("=" * 50 + "\n")
+        return {"discretionary_licenses": []}
+
+    assigned_ids = {
+        (r.get("software_products") or {}).get("product_id")
+        for r in sql_rules
+        if (r.get("software_products") or {}).get("product_id")
+    }
+
+    available_catalog = [p for p in catalog if p.get("product_id") not in assigned_ids]
+    print(f"  - Available catalog after deduplication: {len(available_catalog)} items")
+    
+    if not available_catalog:
+        print("🛑 [DEBUG] No available products remaining in catalog! Returning [].")
+        print("=" * 50 + "\n")
+        return {"discretionary_licenses": []}
+
+    catalog_text = "\n".join([
+        f"- ID: {p['product_id']} | Product: {p['name']} | Type: {p.get('license_type', 'Standard')}"
+        for p in available_catalog
+    ])
+
+    feedback_text = ""
+    if feedback:
+        feedback_text = f"\n### IT REVIEWER FEEDBACK (SOFTWARE REQUESTS):\n" + "\n".join(feedback)
+
+    prompt = f"""You are the Enterprise Software Licensing Specialist.
+Review the candidate's custom notes and IT feedback to identify additional SOFTWARE products required from the catalog.
+
+### CANDIDATE DETAILS
+- Role: {cand.get('role')}
+- Department: {cand.get('department')}
+- Custom Notes: {notes or "None"}
+{feedback_text}
+
+### AVAILABLE SOFTWARE CATALOG (Pick ONLY from this list)
+{catalog_text}
+
+### INSTRUCTIONS
+1. Evaluate whether the Custom Notes or IT Feedback request specific software tools.
+2. Match requested tools strictly against the AVAILABLE SOFTWARE CATALOG using the exact 'product_id'.
+3. Ignore all hardware, monitors, laptops, or physical gear mentioned in the notes (handled by another team).
+4. If no extra software is needed or justified, return an empty array.
+
+Return strictly valid JSON matching the schema."""
+
+    print("\n📝 [DEBUG] PROMPT SENT TO OLLAMA:")
+    print("-" * 40)
+    print(prompt)
+    print("-" * 40)
+
+    try:
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            format=DiscretionaryListOutput.model_json_schema(),
+            options={"temperature": 0.0, "num_ctx": 2048},
+        )
+        raw_output = response.get("message", {}).get("content", "").strip()
+        print(f"\n🤖 [DEBUG] RAW OLLAMA RESPONSE:\n{raw_output}\n")
+        parsed = DiscretionaryListOutput.model_validate_json(raw_output)
+    except Exception as e:
+        print(f"❌ [DEBUG] Parsing/Ollama invocation failed: {e}")
+        print("=" * 50 + "\n")
+        return {"discretionary_licenses": []}
+
+    catalog_map = {p["product_id"]: p["name"] for p in available_catalog}
+    valid_proposals = []
+    
+    for item in parsed.discretionary_licenses:
+        print(f"  - Model proposed: product_id='{item.product_id}' | reason='{item.justification}'")
+        if item.product_id in catalog_map:
+            print(f"    ✅ Matched to catalog: '{catalog_map[item.product_id]}'")
+            valid_proposals.append({
+                "product_id": item.product_id,
+                "name": catalog_map[item.product_id],
+                "justification": item.justification,
+            })
+        else:
+            print(f"    ❌ REJECTED: product_id '{item.product_id}' not found in available catalog!")
+
+    print(f"\n📦 [DEBUG] FINAL DISCRETIONARY OUTPUT: {valid_proposals}")
+    print("=" * 50 + "\n")
+    return {"discretionary_licenses": valid_proposals}
 
 # --- Deterministic DB Execution Nodes ---
 
@@ -233,12 +397,13 @@ def assign_licenses_node(state: OnboardingState) -> dict[str, Any]:
     emp_id = state.get("employee_id")
     req_id = state.get("request_id")
     licenses = state.get("suggested_licenses", [])
+    approved_disc_ids = set(state.get("approved_discretionary_ids", []))
     
     # Refetch fallback if licenses missing
     if not licenses and req_id:
         run_res = (
             supabase.table("workflow_runs")
-            .select("suggested_licenses")
+            .select("suggested_licenses, discretionary_licenses")
             .eq("request_id", req_id)
             .order("created_at", desc=True)
             .limit(1)
@@ -247,22 +412,29 @@ def assign_licenses_node(state: OnboardingState) -> dict[str, Any]:
         if run_res.data:
             licenses = run_res.data[0].get("suggested_licenses", [])
 
-    records = []
+    product_ids_to_assign = set()
+
     for rule in licenses:
         prod = rule.get("software_products") or {}
         prod_id = prod.get("product_id")
-        if not prod_id:
-            continue
+        if prod_id:
+            product_ids_to_assign.add(prod_id)
 
-        records.append(
-            {
-                "assignment_id": f"LIC-{uuid.uuid4().hex[:8].upper()}",
-                "employee_id": emp_id,
-                "product_id": prod_id,
-                "status": "active",
-                "assigned_at": datetime.now().isoformat(),
-            }
-        )
+    for d_id in approved_disc_ids:
+        product_ids_to_assign.add(d_id)
+
+    records = [
+        {
+            "assignment_id": f"LIC-{uuid.uuid4().hex[:8].upper()}",
+            "employee_id": emp_id,
+            "product_id": pid,
+            "status": "active",
+            "assigned_at": datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        for pid in product_ids_to_assign
+    ]
 
     if records:
         supabase.table("license_assignments").insert(records).execute()
@@ -293,6 +465,7 @@ def human_approval_gate_node(state: OnboardingState) -> dict[str, Any]:
             "request_id": state["request_id"],
             "attempt_count": state.get("attempt_count", 1),
             "suggested_licenses": state.get("suggested_licenses", []),
+            "discretionary_licenses": state.get("discretionary_licenses", []),
             "suggested_hardware": state.get("suggested_hardware", {}),
             "flagged_exceptions": state.get("flagged_exceptions", []),
             "it_feedback": state.get("it_feedback", []),
@@ -302,6 +475,7 @@ def human_approval_gate_node(state: OnboardingState) -> dict[str, Any]:
     action = review_input.get("action")  # "approve" or "regenerate"
     note = review_input.get("note", "").strip()
     reviewer = review_input.get("reviewed_by", "IT_ADMIN")
+    approved_disc_ids = review_input.get("approved_discretionary_ids", [])
 
     feedback_list = list(state.get("it_feedback", []))
     if note:
@@ -313,6 +487,7 @@ def human_approval_gate_node(state: OnboardingState) -> dict[str, Any]:
             "review_action": "approve",
             "reviewed_by": reviewer,
             "it_feedback": feedback_list,
+            "approved_discretionary_ids": approved_disc_ids,
             "status": "approved",
         }
 

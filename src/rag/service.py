@@ -42,24 +42,33 @@ def retrieve_onboarding_policies(req: dict[str, Any]) -> list[dict[str, Any]]:
 
 def build_reasoning_prompt(req: dict[str, Any], sql_rules: list[dict[str, Any]], citations: list[dict[str, Any]]) -> str:
     policy_context = "\n\n".join([
-        f"### {doc['policy_name']} - {doc['section_title']} (Clauses: {', '.join(doc['clause_tags'])})\n{doc['content']}"
+        f"### {doc.get('policy_name', 'Policy')} - {doc.get('section_title', 'Section')} "
+        f"(Clauses: {', '.join(doc.get('clause_tags', []))})\n{doc.get('content', '')}"
         for doc in citations
     ])
 
-    return f"""You are the Enterprise Onboarding Orchestrator. 
-Analyze the candidate profile, deterministic database entitlements, and internal compliance policies to produce a structured plan.
+    assigned_tools = ", ".join([
+        (r.get("software_products") or {}).get("name", "Unknown")
+        for r in sql_rules
+    ]) or "Standard office suite"
+
+    return f"""You are the Enterprise Hardware & Compliance Planning Agent.
+Your objective is to determine hardware provisioning, peripherals, shipping requirements, and compliance flags for a new hire.
 
 ### CANDIDATE PROFILE
 - Employee ID: {req.get('employee_id')}
 - Role: {req.get('role')}
 - Department: {req.get('department')}
-- Work Location: {req.get('work_location')}
-- Notes: {req.get('notes') or "None"}
+- Work Location: {req.get('work_location')} (e.g., remote, hybrid, onsite)
+- Assigned Baseline Tools: {assigned_tools}
 
-### DETERMINISTIC SQL ENTITLEMENTS
-{sql_rules}
-
-### RETRIEVED POLICIES
+### RETRIEVED GOVERNANCE & HARDWARE POLICIES
 {policy_context}
 
-Return strictly a valid JSON object."""
+### PLANNING INSTRUCTIONS
+1. **Laptop Provisioning**: Choose an appropriate laptop tier based on the role and department policies (e.g., high-performance developer workstation vs. standard enterprise laptop).
+2. **Peripherals**: Specify necessary peripherals based on policies and role (e.g., external monitors, dock, keyboard, mouse).
+3. **Shipping Required**: Set to `true` if the candidate is remote or hybrid requiring home delivery; set to `false` if strictly onsite.
+4. **Policy Citations & Exceptions**: List applicable policy codes or clause tags from the retrieved text, and flag any compliance exceptions (e.g., contractors requiring non-standard equipment or elevated review).
+
+Do NOT assign or suggest software licenses. Output strictly valid JSON matching the schema."""

@@ -11,6 +11,7 @@ from src.agent.nodes import (
     persist_plan_node,
     policy_rag_node,
     provision_employee_node,
+    discretionary_licensing_node,
 )
 from src.agent.state import OnboardingState
 
@@ -42,12 +43,14 @@ builder.add_node("handle_max_retries", handle_max_retries_node)
 builder.add_node("provision_employee", provision_employee_node) 
 builder.add_node("assign_licenses", assign_licenses_node) 
 builder.add_node("finalize_workflow", finalize_workflow_node)
+builder.add_node("discretionary_licensing", discretionary_licensing_node)
 
 # 2. Linear initialization
 builder.add_edge(START, "fetch_context")
 builder.add_edge("fetch_context", "policy_rag")
 builder.add_edge("policy_rag", "llm_planning")
-builder.add_edge("llm_planning", "persist_plan")
+builder.add_edge("llm_planning", "discretionary_licensing")
+builder.add_edge("discretionary_licensing", "persist_plan")
 builder.add_edge("persist_plan", "human_approval_gate")
 
 # 3. Dynamic HITL cyclic routing
