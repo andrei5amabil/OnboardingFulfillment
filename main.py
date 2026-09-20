@@ -3,7 +3,7 @@ from urllib import response
 import uuid
 from typing import Literal, Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File, Form, UploadFile
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
 from postgrest import APIError
@@ -16,6 +16,8 @@ from src.agent.graph import onboarding_flow
 from langgraph.types import Command
 from src.db import supabase
 import traceback
+from src.extraction.schemas import DocumentType, ExtractionResponse
+from src.extraction.service import DocumentExtractionService
 
 load_dotenv()
 logger = logging.getLogger("uvicorn.error")
@@ -27,12 +29,22 @@ app = FastAPI(title="FastAPI + Supabase Setup")
 class Request(BaseModel):
     first_name: str
     last_name: str
+    national_id: Optional[str] = None
+
     department: str
     role: str
     start_date: str  # ISO format date string
     employment_type: str
     location: str
     work_location: str
+    manager_id: Optional[str] = None
+
+    shipping_address: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+    medical_clearance_status: Optional[bool] = None
+    medical_clearance_date: Optional[date] = None
+
     notes: Optional[str] = ""  # Optional field
     hr_manager_id: str
 
@@ -143,6 +155,37 @@ def check_sb_connection():
         raise HTTPException(
             status_code=500,
             detail=f"Could not reach local Supabase instance: {error_str}"
+        )
+
+@app.post(
+    "/onboarding/extract-document",
+    response_model=ExtractionResponse,
+    status_code=status.HTTP_200_OK,
+)
+def extract_document(
+    file: UploadFile = File(...),
+    document_type: DocumentType = Form(...),
+):
+    """Processes an uploaded document (PDF or Image) through Track A + Track B and returns arbitrated data."""
+    try:
+        file_bytes = file.file.read()
+        result = DocumentExtractionService.process_document(
+            file_bytes=file_bytes,
+            filename=file.filename or "uploaded_document",
+            doc_type=document_type,
+            content_type=file.content_type,
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve),
+        )
+    except Exception as e:
+        logger.error(f"Document extraction failed for {file.filename}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal extraction pipeline error: {str(e)}",
         )
 
 @app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
