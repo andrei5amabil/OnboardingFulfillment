@@ -5,6 +5,7 @@ import os
 from typing import Optional
 import ollama
 from PIL import Image
+import time
 
 from src.extraction.preprocessing import DocumentPage
 from src.extraction.schemas import DocumentType
@@ -36,51 +37,42 @@ class TrackBExtractor:
         """Builds a targeted extraction prompt based on the specific document category."""
         base_instruction = (
             "You are an expert document inspector. Analyze the provided document image(s) carefully. "
-            "Extract all relevant entities, transcribed text, and visual markers. "
-            "Be concise, precise with spelling, and extract each piece of information ONCE. "
-            "Consider both English and Romanian text."
-            "Do NOT repeat the extracted text or loop. Stop when complete.\n\n"
+            "Transcribe the labeled field values clearly and accurately. "
+            "Extract each field once without repeating text.\n\n"
         )
 
         if doc_type == DocumentType.CONTRACT:
             return base_instruction + (
-                "Document Type: EMPLOYMENT CONTRACT\n"
-                "Focus specifically on:\n"
+                "Document Type: EMPLOYMENT CONTRACT / AGREEMENT\n"
+                "Extract the following labeled fields:\n"
+                "- First Name / Given Name\n"
+                "- Last Name / Surname\n"
+                "- National ID / CNP\n"
                 "- Job Title / Role\n"
                 "- Department\n"
-                "- Contract Start Date / Effective Date\n"
-                "- Manager or Supervisor reference\n"
+                "- Start Date / Effective Date\n"
+                "- Reporting Manager ID\n"
                 "- Employment Type (full-time, part-time, contractor)\n"
-                "- Work Location (remote, hybrid, onsite, city)\n"
-                "Transcribe any labeled values clearly."
+                "- Work Location (remote, hybrid, onsite)\n"
+                "- Delivery / Residential Address\n"
+                "- Contact Phone Number\n"
             )
 
         if doc_type == DocumentType.NATIONAL_ID:
             return base_instruction + (
                 "Document Type: NATIONAL IDENTITY CARD / PASSPORT\n"
-                "Focus specifically on:\n"
-                "- Last Name / Surname (Nume)\n"
-                "- First Name / Given Name (Prenume)\n"
-                "- National Identification Number (CNP / Personal ID Number / Passport No)\n"
-                "Make sure not to confuse labels with the actual names."
-            )
-
-        if doc_type == DocumentType.HARDWARE_DELIVERY:
-            return base_instruction + (
-                "Document Type: HARDWARE DELIVERY / LOGISTICS FORM\n"
-                "Focus specifically on:\n"
-                "- Full Recipient Delivery / Shipping Address (Street, City, Postal Code)\n"
-                "- Contact Phone Number for courier\n"
-                "- Any recipient special delivery notes"
+                "Extract:\n"
+                "- First Name / Given Name\n"
+                "- Last Name / Surname\n"
+                "- National Identification Number (ID / SSN / Personal Number)\n"
             )
 
         if doc_type == DocumentType.MEDICAL_CLEARANCE:
             return base_instruction + (
-                "Document Type: MEDICAL CLEARANCE / OCCUPATIONAL HEALTH CERTIFICATE (Fisa de Aptitudine)\n"
-                "Focus specifically on:\n"
-                "- Clearance Verdict / Status: Look for stamps, checks, or text indicating 'APT' (Fit for work) "
-                "or 'INAPT' (Unfit for work).\n"
-                "- Date of medical examination / Issue date.\n"
+                "Document Type: OCCUPATIONAL HEALTH / MEDICAL CLEARANCE CERTIFICATE\n"
+                "Extract:\n"
+                "- Medical Conclusion: check if marked with X as 'FIT FOR WORK'/'APT PENTRU MUNCA', or 'UNFIT FOR WORK'/'INAPT PENTRU MUNCA'\n"
+                "- Examination Date / Issue Date\n"
             )
 
         return base_instruction + "Transcribe all visible information accurately."
@@ -102,6 +94,9 @@ class TrackBExtractor:
         selected_model = model or OLLAMA_VISION_MODEL
         target_pages = pages[:MAX_VISION_PAGES]
 
+        logger.info(f"\n--- 👁️ [TRACK B START] Model='{selected_model}' | DocType='{doc_type.value}' ---")
+        logger.info(f"   └── Encoding {len(target_pages)} page image(s) to Base64...")
+
         # Convert target page images to base64
         images_b64 = [cls._image_to_base64(p.image) for p in target_pages]
         prompt = cls._build_vision_prompt(doc_type)
@@ -111,6 +106,7 @@ class TrackBExtractor:
             f"for doc_type='{doc_type.value}'."
         )
 
+        start_time = time.time()
         try:
             response = ollama.chat(
                 model=selected_model,
@@ -123,12 +119,16 @@ class TrackBExtractor:
                 ],
                 options={
                    "temperature": 0.1,         
-                    "repeat_penalty": 1.2,      
-                    "num_predict": 512,         
+                    "repeat_penalty": 1.3,      
+                    "num_predict": 256,         
                     "stop": ["<|eot_id|>", "--- END ---"],
                 },
             )
+            elapsed = time.time() - start_time
             raw_text = response.get("message", {}).get("content", "").strip()
+
+            logger.info(f"--- 👁️ [TRACK B COMPLETE] (Elapsed: {elapsed:.2f}s) ---")
+            logger.info(f">>> RAW VISION TRANSCRIPTION:\n{raw_text}\n" + "-" * 50)
             return raw_text if raw_text else "[VISION MODEL RETURNED EMPTY RESPONSE]"
         except Exception as e:
             logger.error(f"Track B Vision extraction failed: {e}")

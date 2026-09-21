@@ -40,19 +40,20 @@ class TrackAExtractor:
 
         # Path 1: High-confidence digital text layer exists
         if len(embedded_text) >= MIN_DIGITAL_TEXT_CHARS:
-            logger.info(f"Page {page.page_number}: Using native digital text layer ({len(embedded_text)} chars).")
+            logger.info(f"   └── [Track A] Page {page.page_number}: Using native PDF text layer ({len(embedded_text)} chars)")
             return embedded_text
 
         # Path 2: Scanned PDF or raw photo upload -> Run OCR
-        logger.info(f"Page {page.page_number}: Digital text insufficient/missing. Running OCR fallback.")
+        logger.info(f"   └── [Track A] Page {page.page_number}: Text layer missing/low ({len(embedded_text)} chars). Executing Tesseract OCR...")
         try:
             processed_img = cls.preprocess_image_for_ocr(page.image)
             # PSM 3 (Fully automatic page segmentation) is standard for forms/contracts
             ocr_config = "--oem 3 --psm 3"
             ocr_text = pytesseract.image_to_string(processed_img, lang=lang, config=ocr_config).strip()
+            logger.info(f"       [Track A] OCR completed: {len(ocr_text)} chars extracted.")
             return ocr_text
         except Exception as e:
-            logger.error(f"OCR extraction failed for page {page.page_number}: {e}")
+            logger.error(f"       [Track A] ❌ OCR failed on page {page.page_number}: {e}")
             # Fallback to whatever embedded text existed, even if sparse
             return embedded_text
 
@@ -62,11 +63,13 @@ class TrackAExtractor:
         Processes all pages in the document and returns a formatted text stream.
         """
         extracted_sections = []
-
+        logger.info(f"\n--- 🔍 [TRACK A START] Processing {len(pages)} page(s) via Text/OCR ---")
         for page in pages:
             page_text = cls.extract_page_text(page, lang=lang)
             extracted_sections.append(
                 f"--- [Page {page.page_number}] ---\n{page_text if page_text else '[NO TEXT DETECTED]'}"
             )
-
-        return "\n\n".join(extracted_sections)
+        full_output = "\n\n".join(extracted_sections)
+        preview = full_output[:250].replace('\n', ' ')
+        logger.info(f"--- 🔍 [TRACK A COMPLETE] Total Chars: {len(full_output)} | Preview: \"{preview}...\" ---\n")
+        return full_output

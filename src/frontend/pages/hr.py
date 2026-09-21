@@ -4,12 +4,17 @@ import streamlit as st
 from datetime import date, datetime
 from dotenv import load_dotenv
 from pathlib import Path
+import sys
 
-env_path = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=env_path, override=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.extraction.validation import validate_cross_documents
+
+env_path = PROJECT_ROOT / ".env"
 
 DEPARTMENTS = [
-    # Technology & Delivery Units
     "Software Engineering & Application Modernization",
     "Cloud Infrastructure & Platforms",
     "Cybersecurity & Digital Identity",
@@ -19,7 +24,6 @@ DEPARTMENTS = [
     "Digital Consulting & Transformation Advisory",
     "Product Management & UX/UI Design",
     "Enterprise Architecture & Solutions Design",
-    # Corporate & Enabling Functions
     "Human Resources & Talent Acquisition",
     "Finance, Legal & Corporate Governance",
     "Sales, Presales & Account Management",
@@ -31,136 +35,73 @@ DEPARTMENTS = [
 
 DEPARTMENT_ROLE_MAPPING = {
     "Software Engineering & Application Modernization": [
-        "Junior Frontend Developer",
-        "Frontend Developer",
-        "Senior Frontend Developer",
-        "Junior Backend Engineer",
-        "Backend Engineer",
-        "Senior Backend Engineer",
-        "Junior Full-Stack Engineer",
-        "Full-Stack Engineer",
-        "Senior Full-Stack Engineer",
-        "Lead Software Engineer",
-        "Software Architect",
+        "Junior Frontend Developer", "Frontend Developer", "Senior Frontend Developer",
+        "Junior Backend Engineer", "Backend Engineer", "Senior Backend Engineer",
+        "Junior Full-Stack Engineer", "Full-Stack Engineer", "Senior Full-Stack Engineer",
+        "Lead Software Engineer", "Software Architect",
     ],
     "Cloud Infrastructure & Platforms": [
-        "Junior DevOps Engineer",
-        "DevOps Engineer",
-        "Senior DevOps Engineer",
-        "Junior Cloud Engineer",
-        "Cloud Solutions Architect",
-        "Site Reliability Engineer (SRE)",
+        "Junior DevOps Engineer", "DevOps Engineer", "Senior DevOps Engineer",
+        "Junior Cloud Engineer", "Cloud Solutions Architect", "Site Reliability Engineer (SRE)",
         "Systems Administrator",
     ],
     "Cybersecurity & Digital Identity": [
-        "Junior Security Analyst",
-        "SOC Analyst",
-        "Cybersecurity Engineer",
-        "Penetration Tester",
-        "IAM Specialist",
-        "GRC Consultant",
+        "Junior Security Analyst", "SOC Analyst", "Cybersecurity Engineer",
+        "Penetration Tester", "IAM Specialist", "GRC Consultant",
     ],
     "Data Analytics, AI & Business Intelligence": [
-        "Junior Data Analyst",
-        "Data Analyst",
-        "Junior Data Engineer",
-        "Data Engineer",
-        "Senior Data Engineer",
-        "Machine Learning Engineer",
-        "AI/ML Research Scientist",
-        "BI Developer",
+        "Junior Data Analyst", "Data Analyst", "Junior Data Engineer",
+        "Data Engineer", "Senior Data Engineer", "Machine Learning Engineer",
+        "AI/ML Research Scientist", "BI Developer",
     ],
     "Quality Assurance & Test Automation": [
-        "Junior QA Tester",
-        "QA Automation Engineer",
-        "Senior QA Automation Engineer",
-        "Performance Test Specialist",
-        "Test Lead",
+        "Junior QA Tester", "QA Automation Engineer", "Senior QA Automation Engineer",
+        "Performance Test Specialist", "Test Lead",
     ],
     "IT Service Management & Workplace Operations": [
-        "IT Service Desk Specialist (L1/L2)",
-        "Senior Service Desk Engineer (L3)",
-        "Incident & Problem Manager",
-        "Service Delivery Manager",
-        "Workplace Support Technician",
-        "IT Operations Lead",
+        "IT Service Desk Specialist (L1/L2)", "Senior Service Desk Engineer (L3)",
+        "Incident & Problem Manager", "Service Delivery Manager",
+        "Workplace Support Technician", "IT Operations Lead",
     ],
     "Digital Consulting & Transformation Advisory": [
-        "Associate Consultant",
-        "Technology Consultant",
-        "Senior Digital Consultant",
-        "Consulting Manager",
-        "Solutions Architect",
+        "Associate Consultant", "Technology Consultant", "Senior Digital Consultant",
+        "Consulting Manager", "Solutions Architect",
     ],
     "Product Management & UX/UI Design": [
-        "Junior UI/UX Designer",
-        "UI/UX Designer",
-        "Senior Product Designer",
-        "Product Owner",
-        "Technical Product Manager",
+        "Junior UI/UX Designer", "UI/UX Designer", "Senior Product Designer",
+        "Product Owner", "Technical Product Manager",
     ],
     "Enterprise Architecture & Solutions Design": [
-        "Associate Solutions Architect",
-        "Enterprise Architect",
-        "Chief Solutions Architect",
-        "Domain Architect (Cloud/Data/Security)",
-        "Integration Architect",
-        "Technology Strategy Consultant",
+        "Associate Solutions Architect", "Enterprise Architect", "Chief Solutions Architect",
+        "Domain Architect (Cloud/Data/Security)", "Integration Architect", "Technology Strategy Consultant",
     ],
     "Human Resources & Talent Acquisition": [
-        "Talent Acquisition Specialist",
-        "HR Operations Specialist",
-        "HR Business Partner",
-        "Learning & Development Specialist",
-        "Compensation & Benefits Analyst",
+        "Talent Acquisition Specialist", "HR Operations Specialist", "HR Business Partner",
+        "Learning & Development Specialist", "Compensation & Benefits Analyst",
     ],
     "Finance, Legal & Corporate Governance": [
-        "Financial Analyst",
-        "Senior Corporate Accountant",
-        "Legal Counsel / Contract Specialist",
-        "Compliance & Regulatory Officer",
-        "Tax & Treasury Specialist",
-        "Financial Controller",
+        "Financial Analyst", "Senior Corporate Accountant", "Legal Counsel / Contract Specialist",
+        "Compliance & Regulatory Officer", "Tax & Treasury Specialist", "Financial Controller",
     ],
     "Sales, Presales & Account Management": [
-        "Business Development Representative (BDR)",
-        "Account Executive",
-        "Senior Key Account Manager",
-        "Presales Solution Consultant",
-        "Bid & Proposal Manager",
-        "Sales Director",
+        "Business Development Representative (BDR)", "Account Executive", "Senior Key Account Manager",
+        "Presales Solution Consultant", "Bid & Proposal Manager", "Sales Director",
     ],
     "Project Management Office (PMO)": [
-        "PMO Analyst",
-        "Scrum Master",
-        "Junior Project Manager",
-        "Project Manager",
-        "Senior Project Manager",
-        "Program Director",
+        "PMO Analyst", "Scrum Master", "Junior Project Manager",
+        "Project Manager", "Senior Project Manager", "Program Director",
     ],
     "Internal IT & Information Security": [
-        "Internal Systems Administrator",
-        "Network & Systems Engineer",
-        "Internal IT Support Specialist",
-        "Information Security Analyst",
-        "Endpoint Management Specialist",
-        "Internal IT Infrastructure Lead",
+        "Internal Systems Administrator", "Network & Systems Engineer", "Internal IT Support Specialist",
+        "Information Security Analyst", "Endpoint Management Specialist", "Internal IT Infrastructure Lead",
     ],
     "Marketing & Corporate Communications": [
-        "Content Marketing Specialist",
-        "Digital Marketing Manager",
-        "Corporate Communications Specialist",
-        "Brand & Public Relations Manager",
-        "Event & Campaign Coordinator",
-        "Internal Communications Officer",
+        "Content Marketing Specialist", "Digital Marketing Manager", "Corporate Communications Specialist",
+        "Brand & Public Relations Manager", "Event & Campaign Coordinator", "Internal Communications Officer",
     ],
     "Procurement & Supply Chain Management": [
-        "Procurement Specialist",
-        "IT Vendor Manager",
-        "Sourcing & Contract Specialist",
-        "Supply Chain Analyst",
-        "Category Manager (Hardware & Software)",
-        "Purchasing Officer",
+        "Procurement Specialist", "IT Vendor Manager", "Sourcing & Contract Specialist",
+        "Supply Chain Analyst", "Category Manager (Hardware & Software)", "Purchasing Officer",
     ],
 }
 
@@ -173,6 +114,16 @@ API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 # --- Session State Initialization ---
 if "user_id" not in st.session_state:
     st.session_state.user_id = "EMP-0042"
+
+# Add to your session state initialization:
+if "scanned_documents" not in st.session_state:
+    st.session_state.scanned_documents = {
+        "contract": {},
+        "national_id": {},
+        "medical_clearance": {},
+    }
+if "validation_alerts" not in st.session_state:
+    st.session_state.validation_alerts = []
 
 form_fields = {
     "first_name": "",
@@ -190,6 +141,7 @@ form_fields = {
     "medical_clearance_status": False,
     "medical_clearance_date": date.today(),
     "notes": "",
+    "is_scanning": False,
     "extraction_alerts": [],
 }
 
@@ -198,7 +150,6 @@ for key, default in form_fields.items():
         st.session_state[key] = default
 
 
-# --- Extraction Helper Functions ---
 def parse_date(date_str: str) -> date:
     try:
         return datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -206,140 +157,191 @@ def parse_date(date_str: str) -> date:
         return date.today()
 
 
-def match_option(value: str, options: list[str]) -> str:
-    """Case-insensitive fuzzy/substring match with fallback to first option."""
-    if not value:
-        return options[0]
+def match_option(value: str | None, options: list[str], default: str) -> str:
+    """Robust substring/case-insensitive matcher that falls back to existing value if unmatched."""
+    if not value or not value.strip():
+        return default
     val_clean = value.strip().lower()
     for opt in options:
         if val_clean in opt.lower() or opt.lower() in val_clean:
             return opt
-    return options[0]
+    return default
 
 
-def process_document_upload(uploaded_file, document_type: str):
-    """Submits file to /onboarding/extract-document and maps results to session state."""
-    with st.spinner(f"Extracting {uploaded_file.name} using OCR & Vision models..."):
-        try:
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            data = {"document_type": document_type}
-            res = requests.post(
-                f"{API_URL}/onboarding/extract-document",
-                files=files,
-                data=data,
-                timeout=45,
+def process_single_document(uploaded_file, document_type: str) -> bool:
+    try:
+        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+        data = {"document_type": document_type}
+        res = requests.post(f"{API_URL}/onboarding/extract-document", files=files, data=data, timeout=90)
+
+        if res.status_code == 200:
+            payload = res.json()
+            extracted = payload.get("data", {})
+            flags = payload.get("confidence_flags", [])
+            st.session_state.scanned_documents[document_type] = extracted
+
+            # Re-run cross-validation across all scanned documents so far
+            st.session_state.validation_alerts = validate_cross_documents(
+                contract_data=st.session_state.scanned_documents.get("contract", {}),
+                national_id_data=st.session_state.scanned_documents.get("national_id", {}),
+                medical_data=st.session_state.scanned_documents.get("medical_clearance", {}),
             )
-
-            if res.status_code == 200:
-                payload = res.json()
-                extracted = payload.get("data", {})
-                flags = payload.get("confidence_flags", [])
-
-                # Map extracted values to session state
-                if document_type == "contract":
-                    if extracted.get("department"):
-                        matched_dept = match_option(extracted["department"], DEPARTMENTS)
-                        st.session_state.department = matched_dept
-                        # Update role options for matched department
-                        available_roles = DEPARTMENT_ROLE_MAPPING.get(matched_dept, [])
-                        if extracted.get("role"):
-                            st.session_state.role = match_option(extracted["role"], available_roles)
-                    elif extracted.get("role"):
-                        available_roles = DEPARTMENT_ROLE_MAPPING.get(st.session_state.department, [])
-                        st.session_state.role = match_option(extracted["role"], available_roles)
-
-                    if extracted.get("start_date"):
-                        st.session_state.start_date = parse_date(extracted["start_date"])
-                    if extracted.get("manager_id"):
-                        st.session_state.manager_id = extracted["manager_id"]
-                    if extracted.get("work_location"):
-                        st.session_state.work_location = match_option(
-                            extracted["work_location"].replace("_", "-"), WORK_LOCATION_OPTIONS
-                        )
-                    if extracted.get("employment_type"):
-                        st.session_state.employment_type = match_option(
-                            extracted["employment_type"].replace("_", "-"), EMPLOYMENT_TYPE_OPTIONS
-                        )
-                    if extracted.get("location"):
-                        st.session_state.location = match_option(extracted["location"], LOCATION_OPTIONS)
-
-                elif document_type == "national_id":
-                    if extracted.get("first_name"):
-                        st.session_state.first_name = extracted["first_name"]
-                    if extracted.get("last_name"):
-                        st.session_state.last_name = extracted["last_name"]
-                    if extracted.get("national_id"):
-                        st.session_state.national_id = extracted["national_id"]
-
-                elif document_type == "hardware_delivery":
-                    if extracted.get("shipping_address"):
-                        st.session_state.shipping_address = extracted["shipping_address"]
-                    if extracted.get("contact_phone"):
-                        st.session_state.contact_phone = extracted["contact_phone"]
-
-                elif document_type == "medical_clearance":
-                    st.session_state.medical_clearance_status = bool(
-                        extracted.get("medical_clearance_status", False)
+            if document_type == "contract":
+                if extracted.get("department"):
+                    st.session_state.department = match_option(
+                        extracted["department"], DEPARTMENTS, st.session_state.department
                     )
-                    if extracted.get("issue_date"):
-                        st.session_state.medical_clearance_date = parse_date(extracted["issue_date"])
+                available_roles = DEPARTMENT_ROLE_MAPPING.get(st.session_state.department, [])
+                if extracted.get("role"):
+                    st.session_state.role = match_option(
+                        extracted["role"], available_roles, st.session_state.role
+                    )
+                if extracted.get("start_date"):
+                    st.session_state.start_date = parse_date(extracted["start_date"])
+                if extracted.get("manager_id"):
+                    st.session_state.manager_id = extracted["manager_id"]
+                if extracted.get("shipping_address"):
+                    st.session_state.shipping_address = extracted["shipping_address"]
+                if extracted.get("contact_phone"):
+                    st.session_state.contact_phone = extracted["contact_phone"]
+                if extracted.get("work_location"):
+                    st.session_state.work_location = match_option(
+                        extracted["work_location"].replace("_", "-"),
+                        WORK_LOCATION_OPTIONS,
+                        st.session_state.work_location,
+                    )
+                if extracted.get("employment_type"):
+                    st.session_state.employment_type = match_option(
+                        extracted["employment_type"].replace("_", "-"),
+                        EMPLOYMENT_TYPE_OPTIONS,
+                        st.session_state.employment_type,
+                    )
 
-                st.session_state.extraction_alerts = flags
-                st.success(f"Extracted data from **{uploaded_file.name}** successfully!")
-                st.rerun()
-            else:
-                st.error(f"Extraction failed ({res.status_code}): {res.text}")
+            elif document_type == "national_id":
+                if extracted.get("first_name"):
+                    st.session_state.first_name = extracted["first_name"]
+                if extracted.get("last_name"):
+                    st.session_state.last_name = extracted["last_name"]
+                if extracted.get("national_id"):
+                    st.session_state.national_id = extracted["national_id"]
 
-        except requests.exceptions.ConnectionError:
-            st.error("Could not reach backend service for document extraction.")
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
+            elif document_type == "medical_clearance":
+                st.session_state.medical_clearance_status = bool(
+                    extracted.get("medical_clearance_status", False)
+                )
+                if extracted.get("issue_date"):
+                    st.session_state.medical_clearance_date = parse_date(extracted["issue_date"])
+
+            st.session_state.extraction_alerts.extend(flags)
+            return True
+        else:
+            st.error(f"Failed to extract {uploaded_file.name}: {res.text}")
+            return False
+    except Exception as e:
+        st.error(f"Error processing {uploaded_file.name}: {e}")
+        return False
+
+
+def run_batch_extraction(doc_queue: list[tuple]):
+    st.session_state.is_scanning = True
+    st.session_state.extraction_alerts = []
+    with st.status(f"Processing {len(doc_queue)} document(s)...", expanded=True) as status:
+        for file_obj, doc_type in doc_queue:
+            status.write(f"Scanning **{file_obj.name}** ({doc_type})...")
+            process_single_document(file_obj, doc_type)
+        status.update(label="All documents processed!", state="complete", expanded=False)
+    st.session_state.is_scanning = False
+    st.rerun()
 
 
 # --- Streamlit Layout ---
 st.title("📝 Assisted Employee Onboarding Intake")
-st.caption("Upload documents to automatically pre-fill candidate data, review details, and initiate provisioning.")
+st.caption("Upload candidate documents to pre-fill identity, contract, logistics, and compliance data.")
 
 # --- Document Dropzones ---
 st.subheader("1. Document Ingestion Dropzones")
-st.caption("Upload any of the onboarding documents to scan and auto-populate candidate fields.")
 
-doc_col1, doc_col2, doc_col3, doc_col4 = st.columns(4)
+doc_col1, doc_col2, doc_col3 = st.columns(3)
 
 with doc_col1:
     st.markdown("**📄 Employment Contract**")
-    f_contract = st.file_uploader("Contract (PDF/Image)", type=["pdf", "png", "jpg", "jpeg"], key="uploader_contract")
-    if f_contract and st.button("Scan Contract", use_container_width=True):
-        process_document_upload(f_contract, "contract")
+    f_contract = st.file_uploader(
+        "Contract (PDF/Image)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key="uploader_contract",
+        disabled=st.session_state.is_scanning,
+    )
+    scan_contract_btn = st.button(
+        "Scan Contract",
+        use_container_width=True,
+        disabled=st.session_state.is_scanning or not f_contract,
+    )
 
 with doc_col2:
     st.markdown("**🪪 National Photo ID**")
-    f_id = st.file_uploader("ID Card (PDF/Image)", type=["pdf", "png", "jpg", "jpeg"], key="uploader_id")
-    if f_id and st.button("Scan ID Card", use_container_width=True):
-        process_document_upload(f_id, "national_id")
+    f_id = st.file_uploader(
+        "ID Card (PDF/Image)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key="uploader_id",
+        disabled=st.session_state.is_scanning,
+    )
+    scan_id_btn = st.button(
+        "Scan ID Card",
+        use_container_width=True,
+        disabled=st.session_state.is_scanning or not f_id,
+    )
 
 with doc_col3:
-    st.markdown("**📦 Delivery Form**")
-    f_delivery = st.file_uploader("Delivery (PDF/Image)", type=["pdf", "png", "jpg", "jpeg"], key="uploader_delivery")
-    if f_delivery and st.button("Scan Delivery", use_container_width=True):
-        process_document_upload(f_delivery, "hardware_delivery")
-
-with doc_col4:
     st.markdown("**🏥 Medical Clearance**")
-    f_med = st.file_uploader("Medical (PDF/Image)", type=["pdf", "png", "jpg", "jpeg"], key="uploader_med")
-    if f_med and st.button("Scan Medical", use_container_width=True):
-        process_document_upload(f_med, "medical_clearance")
+    f_med = st.file_uploader(
+        "Medical Certificate (PDF/Image)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key="uploader_med",
+        disabled=st.session_state.is_scanning,
+    )
+    scan_med_btn = st.button(
+        "Scan Medical",
+        use_container_width=True,
+        disabled=st.session_state.is_scanning or not f_med,
+    )
 
-# Render non-blocking confidence flags/warnings from extraction
+# Master Ingestion Button
+available_uploads = []
+if f_contract: available_uploads.append((f_contract, "contract"))
+if f_id: available_uploads.append((f_id, "national_id"))
+if f_med: available_uploads.append((f_med, "medical_clearance"))
+
+scan_all_btn = st.button(
+    f"Scan All Uploaded Documents ({len(available_uploads)} ready)",
+    type="secondary",
+    use_container_width=True,
+    disabled=st.session_state.is_scanning or len(available_uploads) == 0,
+)
+
+if scan_all_btn:
+    run_batch_extraction(available_uploads)
+elif scan_contract_btn:
+    run_batch_extraction([(f_contract, "contract")])
+elif scan_id_btn:
+    run_batch_extraction([(f_id, "national_id")])
+elif scan_med_btn:
+    run_batch_extraction([(f_med, "medical_clearance")])
+
 if st.session_state.extraction_alerts:
     for alert in st.session_state.extraction_alerts:
         st.warning(alert)
 
-st.divider()
+# --- Render Cross-Document Validation Alerts ---
+if st.session_state.validation_alerts:
+    for alert in st.session_state.validation_alerts:
+        if alert.severity == "critical":
+            st.error(f"🚨 **{alert.field.upper()}**: {alert.message}")
+        elif alert.severity == "warning":
+            st.warning(f"⚠️ **{alert.field.upper()}**: {alert.message}")
+        else:
+            st.info(f"ℹ️ **{alert.field.upper()}**: {alert.message}")
 
-# --- Pre-filled Form ---
 st.subheader("2. Candidate Profile & Review")
-st.caption("Verify and modify the pre-filled information before initiating the onboarding pipeline.")
 
 col1, col2 = st.columns(2)
 
@@ -378,29 +380,32 @@ with col2:
     )
     work_location = st.selectbox("Work Location", options=WORK_LOCATION_OPTIONS, index=work_loc_idx)
 
-    shipping_address = st.text_area(
-        "Shipping Address (Required for Remote/Hybrid)",
-        value=st.session_state.shipping_address,
-        height=85,
-    )
+    shipping_address = st.text_area("Delivery Address (Required for Remote/Hybrid)", value=st.session_state.shipping_address, height=85)
     contact_phone = st.text_input("Contact Phone Number", value=st.session_state.contact_phone)
 
     st.markdown("##### 🏥 Medical Gatekeeper")
     med_status = st.checkbox(
-        "Medical Clearance Confirmed (Apt de Munca)",
+        "Medical Clearance Confirmed (Fit for Work)",
         value=st.session_state.medical_clearance_status,
     )
     med_date = st.date_input("Clearance Examination Date", value=st.session_state.medical_clearance_date)
 
 notes = st.text_area("Additional Onboarding Notes (Special Software/Hardware Requests)", value=st.session_state.notes)
 
-st.caption("⚠️ Core identity and role fields are required before triggering automated provisioning.")
-
-# --- Submission Logic ---
+# Submission
 if st.button("Initiate Onboarding", type="primary", use_container_width=True):
     if not all((first_name.strip(), last_name.strip(), department, role, start_date, employment_type)):
         st.error("Please fill in all required identity and job role fields.")
     else:
+        discrepancy_notes = [
+            f"[{a.severity.upper()}] {a.message}"
+            for a in st.session_state.validation_alerts
+            if a.severity == "critical"
+        ]
+
+        final_notes = notes.strip()
+        if discrepancy_notes:
+            final_notes += "\n\n### AUTOMATED DOCUMENT DISCREPANCY FLAGS:\n" + "\n".join(discrepancy_notes)
         payload = {
             "first_name": first_name.strip(),
             "last_name": last_name.strip(),
@@ -417,17 +422,14 @@ if st.button("Initiate Onboarding", type="primary", use_container_width=True):
             "medical_clearance_status": med_status,
             "medical_clearance_date": str(med_date) if med_status else None,
             "hr_manager_id": st.session_state.user_id,
-            "notes": notes.strip(),
+            "notes": final_notes,
         }
 
         try:
             res = requests.post(f"{API_URL}/onboarding/requests", json=payload, timeout=15)
             if res.status_code == 200:
-                data = res.json()
-                st.success(
-                    f"Onboarding request created! Agent workflow initialized for **{first_name} {last_name}**."
-                )
-                st.json(data)
+                st.success(f"Onboarding request created for **{first_name} {last_name}**!")
+                st.json(res.json())
             else:
                 st.error(f"Failed to submit: {res.json().get('detail', 'Unknown error')}")
         except requests.exceptions.ConnectionError:

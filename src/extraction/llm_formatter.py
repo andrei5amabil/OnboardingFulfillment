@@ -1,27 +1,31 @@
 import json
 import logging
 import os
-from typing import Any, Union
+import re
+import time
+from typing import Union
 import ollama
 from pydantic import ValidationError
-from dotenv import load_dotenv
-from pathlib import Path
-
-env_path = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=env_path, override=True)
 
 from src.extraction.schemas import (
     DOCUMENT_SCHEMA_MAP,
     ContractExtractionSchema,
     DocumentType,
-    HardwareDeliveryExtractionSchema,
     MedicalClearanceExtractionSchema,
     NationalIDExtractionSchema,
 )
 
 logger = logging.getLogger("uvicorn.error")
+OLLAMA_JUDGE_MODEL = os.getenv("OLLAMA_JUDGE_MODEL", "qwen2.5:3b")
 
-OLLAMA_JUDGE_MODEL = os.getenv("OLLAMA_MODEL", "granite4.2:3b")
+
+def extract_json_block(text: str) -> str:
+    """Extracts the outermost valid JSON object from a string, stripping markdown or thinking text."""
+    text = text.strip()
+    match = re.search(r"(\{.*\})", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text
 
 
 class TrackCJudge:
@@ -32,56 +36,35 @@ class TrackCJudge:
         track_a_text: str,
         track_b_text: str,
     ) -> str:
-        # Document-specific field hints to eliminate ambiguity
-        field_hints = ""
-        if doc_type == DocumentType.MEDICAL_CLEARANCE:
-            field_hints = (
-                "SPECIFIC MAPPINGS FOR MEDICAL CLEARANCE:\n"
-                "- 'issue_date': Map from 'Data examinarii', 'Data emiterii', or examination/issue date. Do NOT leave null if a date is present.\n"
-                "- 'medical_clearance_status': Set to true if 'APT' or 'APT PENTRU MUNCA', false if 'INAPT'."
-            )
-        elif doc_type == DocumentType.NATIONAL_ID:
-            field_hints = (
-                "SPECIFIC MAPPINGS FOR NATIONAL ID:\n"
-                "- 'first_name': 'Prenume'\n"
-                "- 'last_name': 'Nume'\n"
-                "- 'national_id': 'CNP' or card number."
-            )
-        elif doc_type == DocumentType.CONTRACT:
-            field_hints = (
-                "SPECIFIC MAPPINGS FOR CONTRACT:\n"
-                "- 'role': 'Functia' / 'Postul'\n"
-                "- 'start_date': 'Data inceperii' / 'Data intrarii in vigoare' -> YYYY-MM-DD format."
-            )
-        elif doc_type == DocumentType.HARDWARE_DELIVERY:
-            field_hints = (
-                "SPECIFIC MAPPINGS FOR DELIVERY:\n"
-                "- 'shipping_address': Street, city, postal code.\n"
-                "- 'contact_phone': Phone number."
-            )
+        return f"""You are a precise data extraction specialist.
+Extract structured JSON matching the requested schema from the document streams below for a {doc_type.value.upper()}.
 
-        return f"""You are the Lead Document Arbitration Specialist.
-Your task is to reconcile data extracted from two separate engines (Track A: Linear PDF/OCR Text and Track B: Visual Layout LLM) for a {doc_type.value.upper()}.
+### SOURCE 1 (PDF TEXT / OCR):
+{track_a_text or "[NO TEXT]"}
 
-### ENGINE 1 (TRACK A: PDF TEXT / OCR STREAM)
-{track_a_text or "[NO TEXT EXTRACTED BY TRACK A]"}
+### SOURCE 2 (VISION MODEL OUTPUT):
+{track_b_text or "[NO TEXT]"}
 
-### ENGINE 2 (TRACK B: VISION MODEL EXTRACTION)
-{track_b_text or "[NO TEXT EXTRACTED BY TRACK B]"}
+### FIELD EXTRACTION RULES:
+1. For CONTRACT documents:
+   - "Employee: <Full Name>" -> Split into 'first_name' and 'last_name' (e.g., "Employee: Andreea Dumitrescu" -> first_name: "Andreea", last_name: "Dumitrescu").
+   - "Job Title / Role: <Title>" -> Extract as 'role' (e.g., "UI/UX Designer").
+   - "Department: <Dept>" -> Extract exact string as 'department'.
+   - "Start Date / Effective Date: <Date>" -> Extract as 'start_date' (YYYY-MM-DD).
+   - "Reporting Manager ID: <ID>" -> Extract as 'manager_id'.
+   - "Delivery / Residential Address: <Addr>" -> Extract as 'shipping_address'.
+   - "Contact Phone Number: <Phone>" -> Extract as 'contact_phone'.
 
-### ARBITRATION RULES:
-1. Reconcile minor OCR misspellings or diacritic corruptions (e.g., 'Å PTFENTRU' -> 'APT', meaning fit for work).
-2. Dates: Convert all textual or regional date formats into ISO 8601 (YYYY-MM-DD). If a valid date exists in the source text, extract it and do NOT leave it null.
-3. Names: Pick the clean, capitalization-corrected legal name, ignoring field labels like 'NUME', 'PRENUME', or 'SALARIAT'.
-4. Medical Clearance: Determine clearance status strictly as a boolean:
-   - True if 'APT' / 'FIT' / 'CLEARED'
-   - False if 'INAPT' / 'UNFIT' or if the status is absent/unclear.
-5. If an attribute is genuinely missing from both inputs, set it to null (or false for booleans).
+2. For NATIONAL ID documents:
+   - Extract 'first_name', 'last_name', and the 13-digit 'national_id' (CNP).
 
-{field_hints}
+3. For MEDICAL CLEARANCE documents:
+   - Extract 'issue_date' (YYYY-MM-DD).
+   - 'medical_clearance_status': true if 'FIT FOR WORK', 'CLEARED', or 'APT' is checked/stated. Otherwise false.
 
-Return ONLY a valid JSON object matching the requested schema. No conversational filler."""
-    
+4. If an attribute is completely missing from the text, set it to null. Never invent placeholders.
+5. Return strictly valid JSON adhering to the schema."""
+
     @classmethod
     def arbitrate(
         cls,
@@ -92,53 +75,58 @@ Return ONLY a valid JSON object matching the requested schema. No conversational
     ) -> Union[
         ContractExtractionSchema,
         NationalIDExtractionSchema,
-        HardwareDeliveryExtractionSchema,
         MedicalClearanceExtractionSchema,
     ]:
-        """
-        Reconciles Track A and Track B texts into a strictly validated Pydantic model.
-        """
         schema_cls = DOCUMENT_SCHEMA_MAP[doc_type]
         judge_model = model or OLLAMA_JUDGE_MODEL
-
         prompt = cls._build_judge_prompt(doc_type, track_a_text, track_b_text)
 
-        logger.info(f"Track C: Invoking Judge ({judge_model}) for doc_type='{doc_type.value}'")
+        logger.info(f"\n--- ⚖️ [TRACK C ARBITRATION] Model='{judge_model}' | Target='{schema_cls.__name__}' ---")
+        t0 = time.time()
 
-        # 1. Grammar-constrained structured output via Ollama
+        # Try 1: Structured grammar constraint
         try:
             response = ollama.chat(
                 model=judge_model,
                 messages=[{"role": "user", "content": prompt}],
                 format=schema_cls.model_json_schema(),
-                options={
-                    "temperature": 0.0,
-                    "num_ctx": 4096,
-                },
+                options={"temperature": 0.0, "num_ctx": 2048},
             )
-            raw_content = response.get("message", {}).get("content", "").strip()
-            validated_obj = schema_cls.model_validate_json(raw_content)
-            return validated_obj
-        except ValidationError as ve:
-            logger.warning(f"Grammar validation failed on raw output ({ve}). Retrying with generic JSON mode.")
-        except Exception as e:
-            logger.warning(f"Track C constrained call failed: {e}. Retrying with generic JSON mode.")
+            msg = response.get("message", {})
+            # Read content, with fallback to thinking if content is empty
+            raw_content = msg.get("content", "").strip() or msg.get("thinking", "").strip()
+            raw_json = extract_json_block(raw_content)
 
-        # 2. Fallback: Generic JSON mode
+            logger.info(f"   └── Track C completed in {time.time() - t0:.2f}s")
+            logger.info(f">>> [RAW TRACK C JSON]:\n{raw_json}")
+
+            validated = schema_cls.model_validate_json(raw_json)
+            logger.info(f">>> ✅ [VALIDATED {schema_cls.__name__}]:\n{validated.model_dump_json(indent=2)}\n" + "=" * 60)
+            return validated
+
+        except Exception as e:
+            logger.warning(f"   └── ⚠️ Grammar parsing failed ({e}). Retrying in generic JSON mode...")
+
+        # Try 2: Generic JSON mode
         fallback_prompt = (
-            f"{prompt}\n\nRespond strictly with a JSON object adhering to the schema properties: "
-            f"{list(schema_cls.model_fields.keys())}"
+            f"{prompt}\n\nRespond ONLY with a JSON object containing keys: {list(schema_cls.model_fields.keys())}"
         )
-        response = ollama.chat(
-            model=judge_model,
-            messages=[{"role": "user", "content": fallback_prompt}],
-            format="json",
-            options={"temperature": 0.0, "num_ctx": 4096},
-        )
-        raw_content = response.get("message", {}).get("content", "").strip()
-
         try:
-            return schema_cls.model_validate_json(raw_content)
+            response = ollama.chat(
+                model=judge_model,
+                messages=[{"role": "user", "content": fallback_prompt}],
+                format="json",
+                options={"temperature": 0.0, "num_ctx": 2048},
+            )
+            msg = response.get("message", {})
+            raw_content = msg.get("content", "").strip() or msg.get("thinking", "").strip()
+            raw_json = extract_json_block(raw_content)
+            logger.info(f">>> [FALLBACK JSON]:\n{raw_json}")
+
+            validated = schema_cls.model_validate_json(raw_json)
+            logger.info(f">>> ✅ [VALIDATED (FALLBACK)]:\n{validated.model_dump_json(indent=2)}\n" + "=" * 60)
+            return validated
         except Exception as e:
-            logger.error(f"Track C arbitration completely failed to produce valid schema: {e}\nRaw: {raw_content}")
-            raise ValueError(f"Could not arbitrate document into {schema_cls.__name__}: {str(e)}")
+            logger.error(f"❌ Track C arbitration completely failed for {doc_type.value}: {e}")
+            # Fallback to an empty instance of the schema to avoid crashing the entire pipeline
+            return schema_cls()

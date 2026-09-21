@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from typing import Optional
 import pymupdf as fitz 
 from PIL import Image
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 
 ALLOWED_TYPES = {
     "application/pdf": "pdf",
@@ -28,6 +31,8 @@ class DocumentPreprocessor:
         Validates the incoming byte stream and standardizes both PDFs
         and standard image formats into a list of DocumentPage objects.
         """
+        size_kb = len(file_bytes) / 1024
+
         if len(file_bytes) == 0:
             raise ValueError("Uploaded file is empty.")
 
@@ -50,9 +55,12 @@ class DocumentPreprocessor:
                 f"Unsupported file format for '{filename}'. Allowed formats: PDF, JPEG, PNG, WEBP."
             )
 
+        logger.info(f"📦 [PREPROCESS] '{filename}' | Detected format: {ext.upper()} | Size: {size_kb:.1f} KB")
+
         if ext in ["jpeg", "png", "webp"]:
             try:
                 pil_image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+                logger.info(f"   └── Single image loaded: Dimensions={pil_image.size}, Mode={pil_image.mode}")
                 return [
                     DocumentPage(
                         page_number=1,
@@ -71,7 +79,7 @@ class DocumentPreprocessor:
                 # Render page at 200 DPI for Vision / OCR consumption
                 pix = page.get_pixmap(dpi=200)
                 page_img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
-
+                logger.info(f"       Page {idx + 1}: Embedded text chars = {len(embedded_text)}")
                 pages.append(
                     DocumentPage(
                         page_number=idx + 1,

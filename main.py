@@ -177,15 +177,10 @@ def extract_document(
         )
         return result
     except ValueError as ve:
+        logger.error(f"❌ Document extraction ValueError for {file.filename}: {ve}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve),
-        )
-    except Exception as e:
-        logger.error(f"Document extraction failed for {file.filename}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal extraction pipeline error: {str(e)}",
         )
 
 @app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
@@ -215,6 +210,12 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
             "first_name": item.first_name,
             "last_name": item.last_name,
             "department": item.department,
+            "national_id": item.national_id,
+            "manager_id": item.manager_id,
+            "shipping_address": item.shipping_address,
+            "contact_phone": item.contact_phone,
+            "medical_clearance": item.medical_clearance_status,
+            "medical_clearance_date": str(item.medical_clearance_date) if item.medical_clearance_date else None,
             "role": item.role,
             "start_date": item.start_date,
             "employment_type": item.employment_type,

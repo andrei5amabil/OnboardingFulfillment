@@ -14,3 +14,4 @@ src/frontend/.env
 
 node_modules/
 chroma_db/
+mock_documents/
