@@ -106,6 +106,23 @@ def fetch_context_node(state: OnboardingState) -> dict[str, Any]:
     department = candidate_data.get("department", "")
     role = candidate_data.get("role", "")
 
+    flagged = list(state.get("flagged_exceptions", []))
+
+    if candidate_data.get("medical_clearance_status") is False:
+        flagged.append(
+            "COMPLIANCE GATE: Candidate marked UNFIT or medical clearance unconfirmed. "
+            "Provisioning halted pending occupational health re-examination."
+        )
+
+    work_loc = (candidate_data.get("work_location") or "").lower()
+    if work_loc in ["remote", "hybrid"] and not candidate_data.get("shipping_address"):
+        flagged.append(
+            "LOGISTICS WARNING: Remote/Hybrid hire is missing a valid equipment shipping address."
+        )
+
+    if not candidate_data.get("national_id"):
+        flagged.append("COMPLIANCE NOTICE: National ID / CNP is missing from the record.")
+
     # Query deterministic software assignment rules
     filter_query = (
         f"department.is.null,"
@@ -138,6 +155,7 @@ def fetch_context_node(state: OnboardingState) -> dict[str, Any]:
         "suggested_licenses": deduped_licenses,
         "software_catalog": software_catalog,
         "status": "processing_rules",
+        "flagged_exceptions": flagged,
     }
 
 
@@ -377,6 +395,7 @@ def provision_employee_node(state: OnboardingState) -> dict[str, Any]:
         "onboarding_request_id": state["request_id"],
         "first_name": cand["first_name"],
         "last_name": cand["last_name"],
+        "national_id": cand.get("national_id"),
         "work_email": work_email,
         "department": cand["department"],
         "role": cand["role"],
@@ -384,6 +403,9 @@ def provision_employee_node(state: OnboardingState) -> dict[str, Any]:
         "employment_type": cand["employment_type"],
         "location": cand["location"],
         "work_location": cand["work_location"],
+        "medical_clearance_status": cand["medical_clearance_status"],
+        "shipping_address": cand.get("shipping_address"),
+        "contact_phone": cand.get("contact_phone"),
         "manager_id": cand.get("manager_id"),
         "status": "active",
         "updated_at": datetime.now().isoformat(),

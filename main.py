@@ -54,12 +54,18 @@ class DB_Request(BaseModel):
     employee_id: str
     first_name: str
     last_name: str
+    national_id: Optional[str] = None
     department: str
     role: str
     start_date: date
     employment_type: str
     location: str
     work_location: str
+    manager_id: Optional[str] = None
+    shipping_address: Optional[str] = None
+    contact_phone: Optional[str] = None
+    medical_clearance_status: Optional[bool] = None
+    medical_clearance_date: Optional[date] = None
     hr_manager_id: str
     notes: Optional[str] = None
     status: str
@@ -214,7 +220,7 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
             "manager_id": item.manager_id,
             "shipping_address": item.shipping_address,
             "contact_phone": item.contact_phone,
-            "medical_clearance": item.medical_clearance_status,
+            "medical_clearance_status": item.medical_clearance_status,
             "medical_clearance_date": str(item.medical_clearance_date) if item.medical_clearance_date else None,
             "role": item.role,
             "start_date": item.start_date,
@@ -316,8 +322,8 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
                 "software_catalog": software_catalog,
                 "approved_discretionary_ids": payload.approved_discretionary_ids,
                 "suggested_hardware": run_data.get("suggested_hardware", {}),
-                "policy_tags": [],
-                "flagged_exceptions": [],
+                "policy_tags": run_data.get("policy_citations", [{}])[0].get("tags", []) if run_data.get("policy_citations") else [],
+                "flagged_exceptions": run_data.get("policy_citations", [{}])[0].get("flagged_exceptions", []) if run_data.get("policy_citations") else [],
                 "citations": [],
                 "attempt_count": 1,
                 "it_feedback": [payload.note] if payload.note else [],
