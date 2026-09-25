@@ -149,6 +149,43 @@ for key, default in form_fields.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
+def format_name(name: str | None) -> str:
+    """
+    Normalizes capitalization for personal names.
+    Handles all-caps, all-lowercase, hyphens, apostrophes, and diacritics.
+    
+    Examples:
+        'JOHN DOE'       -> 'John Doe'
+        'jean-luc'       -> 'Jean-Luc'
+        'O\'CONNOR'      -> 'O\'Connor'
+        'mcdonald'       -> 'McDonald'
+        'șerban popescu' -> 'Șerban Popescu'
+    """
+    if not name or not isinstance(name, str):
+        return ""
+
+    def _capitalize_part(part: str) -> str:
+        if not part:
+            return ""
+        # Handle Celtic 'Mc' prefix (e.g., McDonald)
+        if part.lower().startswith("mc") and len(part) > 2:
+            return "Mc" + part[2:].capitalize()
+        return part.capitalize()
+
+    def _capitalize_token(token: str) -> str:
+        # Split on apostrophes (e.g., O'Connor, D'Angelo)
+        apostrophe_parts = token.split("'")
+        return "'".join(_capitalize_part(p) for p in apostrophe_parts)
+
+    words = name.strip().split()
+    formatted_words = []
+
+    for word in words:
+        # Split on hyphens (e.g., Anne-Marie)
+        hyphen_parts = word.split("-")
+        formatted_words.append("-".join(_capitalize_token(p) for p in hyphen_parts))
+
+    return " ".join(formatted_words)
 
 def parse_date(date_str: str) -> date:
     try:
@@ -219,9 +256,9 @@ def process_single_document(uploaded_file, document_type: str) -> bool:
 
             elif document_type == "national_id":
                 if extracted.get("first_name"):
-                    st.session_state.first_name = extracted["first_name"]
+                    st.session_state.first_name = format_name(extracted["first_name"])
                 if extracted.get("last_name"):
-                    st.session_state.last_name = extracted["last_name"]
+                    st.session_state.last_name = format_name(extracted["last_name"])
                 if extracted.get("national_id"):
                     st.session_state.national_id = extracted["national_id"]
 
@@ -403,12 +440,15 @@ if st.button("Initiate Onboarding", type="primary", use_container_width=True):
             if a.severity == "critical"
         ]
 
+        clean_first_name = format_name(first_name)
+        clean_last_name = format_name(last_name)
+
         final_notes = notes.strip()
         if discrepancy_notes:
             final_notes += "\n\n### AUTOMATED DOCUMENT DISCREPANCY FLAGS:\n" + "\n".join(discrepancy_notes)
         payload = {
-            "first_name": first_name.strip(),
-            "last_name": last_name.strip(),
+            "first_name": clean_first_name.strip(),
+            "last_name": clean_last_name.strip(),
             "national_id": national_id.strip() if national_id else None,
             "department": department,
             "role": role,

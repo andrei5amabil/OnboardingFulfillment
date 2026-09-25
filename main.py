@@ -18,6 +18,7 @@ from src.db import supabase
 import traceback
 from src.extraction.schemas import DocumentType, ExtractionResponse
 from src.extraction.service import DocumentExtractionService
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 logger = logging.getLogger("uvicorn.error")
@@ -25,6 +26,17 @@ logger = logging.getLogger("uvicorn.error")
 
 
 app = FastAPI(title="FastAPI + Supabase Setup")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Request(BaseModel):
     first_name: str
