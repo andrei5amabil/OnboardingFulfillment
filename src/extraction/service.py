@@ -7,6 +7,7 @@ from src.extraction.preprocessing import DocumentPreprocessor
 from src.extraction.schemas import (
     ContractExtractionSchema,
     DocumentType,
+    ExtractionMetrics,
     ExtractionResponse,
     MedicalClearanceExtractionSchema,
     NationalIDExtractionSchema,
@@ -50,18 +51,17 @@ class DocumentExtractionService:
 
         track_a_text = ""
         track_b_text = ""
+        vision_tokens = {"prompt_tokens": 0, "completion_tokens": 0}
 
         if is_digital_document:
             logger.info(
                 f"Fast-path triggered for '{filename}': {total_digital_chars} digital chars detected. "
                 "Skipping Vision LLM (Track B)."
             )
-            # Track A extracts the native digital text layer in < 50ms
             track_a_text = TrackAExtractor.extract(pages)
             track_b_text = "[DIGITAL DOCUMENT: Track B vision bypassed to optimize latency]"
         else:
             logger.info(f"Visual document detected for '{filename}'. Running Track A (OCR) & Track B (Vision).")
-            # Concurrently run OCR and Vision for scans/photos
             with ThreadPoolExecutor(max_workers=2) as executor:
                 future_a = executor.submit(TrackAExtractor.extract, pages)
                 future_b = executor.submit(
@@ -71,10 +71,10 @@ class DocumentExtractionService:
                     model=vision_model,
                 )
                 track_a_text = future_a.result()
-                track_b_text = future_b.result()
+                track_b_text, vision_tokens = future_b.result()
 
         # 3. Track C: Judge LLM Arbitration
-        validated_data = TrackCJudge.arbitrate(
+        validated_data, judge_tokens = TrackCJudge.arbitrate(
             doc_type=doc_type,
             track_a_text=track_a_text,
             track_b_text=track_b_text,
@@ -97,14 +97,30 @@ class DocumentExtractionService:
             if not validated_data.start_date:
                 flags.append("NOTICE: Start date was not clearly identified.")
 
-        total_elapsed = time.time() - t0
-        logger.info(f"🏁 [PIPELINE FINISHED] Completed in {total_elapsed:.2f}s | Warnings: {flags}")
+        total_elapsed = round(time.time() - t0, 2)
+        total_prompt_tokens = vision_tokens["prompt_tokens"] + judge_tokens["prompt_tokens"]
+        total_completion_tokens = vision_tokens["completion_tokens"] + judge_tokens["completion_tokens"]
+
+        metrics = ExtractionMetrics(
+            execution_time_seconds=total_elapsed,
+            tokens_prompt=total_prompt_tokens,
+            tokens_completion=total_completion_tokens,
+            tokens_total=total_prompt_tokens + total_completion_tokens,
+            fast_path_used=is_digital_document,
+        )
+
+        logger.info(
+            f"🏁 [PIPELINE FINISHED] Completed in {total_elapsed:.2f}s | "
+            f"Tokens: {metrics.tokens_total} (P: {metrics.tokens_prompt}, C: {metrics.tokens_completion}) | "
+            f"FastPath: {is_digital_document} | Warnings: {flags}"
+        )
         logger.info("=" * 70 + "\n")
-        
+
         return ExtractionResponse(
             status="success",
             document_type=doc_type,
             filename=filename,
             confidence_flags=flags,
+            metrics=metrics,
             data=validated_data,
         )

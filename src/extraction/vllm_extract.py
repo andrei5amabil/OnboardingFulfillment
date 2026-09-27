@@ -83,13 +83,13 @@ class TrackBExtractor:
         pages: list[DocumentPage],
         doc_type: DocumentType,
         model: Optional[str] = None,
-    ) -> str:
+    ) -> tuple[str, dict[str, int]]:
         """
         Processes document pages through the local Ollama Vision LLM.
         Returns the model's visual analysis and transcription.
         """
         if not pages:
-            return "[NO PAGES PROVIDED]"
+            return "[NO PAGES PROVIDED]", {"prompt_tokens": 0, "completion_tokens": 0}
 
         selected_model = model or OLLAMA_VISION_MODEL
         target_pages = pages[:MAX_VISION_PAGES]
@@ -97,7 +97,6 @@ class TrackBExtractor:
         logger.info(f"\n--- 👁️ [TRACK B START] Model='{selected_model}' | DocType='{doc_type.value}' ---")
         logger.info(f"   └── Encoding {len(target_pages)} page image(s) to Base64...")
 
-        # Convert target page images to base64
         images_b64 = [cls._image_to_base64(p.image) for p in target_pages]
         prompt = cls._build_vision_prompt(doc_type)
 
@@ -107,6 +106,9 @@ class TrackBExtractor:
         )
 
         start_time = time.time()
+        prompt_tokens = 0
+        completion_tokens = 0
+
         try:
             response = ollama.chat(
                 model=selected_model,
@@ -118,18 +120,23 @@ class TrackBExtractor:
                     }
                 ],
                 options={
-                   "temperature": 0.1,         
-                    "repeat_penalty": 1.3,      
-                    "num_predict": 256,         
+                    "temperature": 0.1,
+                    "repeat_penalty": 1.3,
+                    "num_predict": 256,
                     "stop": ["<|eot_id|>", "--- END ---"],
                 },
             )
             elapsed = time.time() - start_time
+            prompt_tokens = response.get("prompt_eval_count", 0)
+            completion_tokens = response.get("eval_count", 0)
             raw_text = response.get("message", {}).get("content", "").strip()
 
-            logger.info(f"--- 👁️ [TRACK B COMPLETE] (Elapsed: {elapsed:.2f}s) ---")
+            logger.info(f"--- 👁️ [TRACK B COMPLETE] (Elapsed: {elapsed:.2f}s | Tokens: {prompt_tokens + completion_tokens}) ---")
             logger.info(f">>> RAW VISION TRANSCRIPTION:\n{raw_text}\n" + "-" * 50)
-            return raw_text if raw_text else "[VISION MODEL RETURNED EMPTY RESPONSE]"
+            return (
+                raw_text if raw_text else "[VISION MODEL RETURNED EMPTY RESPONSE]",
+                {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+            )
         except Exception as e:
             logger.error(f"Track B Vision extraction failed: {e}")
-            return f"[VISION EXTRACTION ERROR: {str(e)}]"
+            return f"[VISION EXTRACTION ERROR: {str(e)}]", {"prompt_tokens": 0, "completion_tokens": 0}

@@ -22,3 +22,6 @@ class OnboardingState(TypedDict):
     attempt_count: int
     it_feedback: Optional[list[str]]
     review_action: Optional[str]
+    tokens_prompt: int
+    tokens_completion: int
+    tokens_total: int

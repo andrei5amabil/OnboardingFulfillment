@@ -1,7 +1,7 @@
 import React from 'react';
-import { UserCheck, ShieldAlert, Cpu, Sparkles } from 'lucide-react';
+import { UserCheck, ShieldAlert, Cpu, Sparkles, TrendingUp } from 'lucide-react';
 
-export type NavTab = 'hr' | 'it';
+export type NavTab = 'hr' | 'it' | 'kpi';
 
 interface NavbarProps {
   currentTab: NavTab;
@@ -65,6 +65,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {pendingCount}
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTabChange('kpi')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              currentTab === 'kpi'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>KPI Analytics</span>
           </button>
         </nav>
 

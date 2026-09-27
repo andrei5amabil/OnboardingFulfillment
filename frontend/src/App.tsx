@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navbar, type NavTab } from './components/Navbar';
 import { HrIntakePage } from './pages/HRIntake';
 import { ITApprovalsPage } from './pages/ITApprovals';
+import { KPIDashboard } from './pages/KPIDashboard';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('hr');
@@ -13,7 +14,9 @@ export default function App() {
 
       {/* Main Page View */}
       <main className="flex-1">
-        {currentTab === 'hr' ? <HrIntakePage /> : <ITApprovalsPage />}
+        {currentTab === 'hr' && <HrIntakePage />}
+        {currentTab === 'it' && <ITApprovalsPage />}
+        {currentTab === 'kpi' && <KPIDashboard />}
       </main>
     </div>
   );

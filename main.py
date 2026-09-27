@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File,
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
 from postgrest import APIError
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 import ollama
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
@@ -19,6 +19,7 @@ import traceback
 from src.extraction.schemas import DocumentType, ExtractionResponse
 from src.extraction.service import DocumentExtractionService
 from fastapi.middleware.cors import CORSMiddleware
+import time
 
 load_dotenv()
 logger = logging.getLogger("uvicorn.error")
@@ -89,8 +90,19 @@ class ReviewPayload(BaseModel):
     reviewed_by: Optional[str] = "IT_ADMIN"
     approved_discretionary_ids: list[str] = Field(default_factory=list)
 
+class KPIResponse(BaseModel):
+    total_onboarded: int
+    avg_tokens_per_employee: float
+    token_usage_breakdown: dict
+    avg_agent_execution_seconds: float
+    avg_total_lead_time_seconds: float
+    first_pass_approval_rate: float
+    escalation_rate: float
+    recent_runs: list[dict]
+
 def kickoff_agent_workflow(request_id: str, *args, **kwargs):
     """Initializes and runs the graph until the approval gate interrupt."""
+    t0 = time.perf_counter()
     logger.info("▶️ [Agent Workflow] Starting generation for %s", request_id)
     config = {"configurable": {"thread_id": request_id}}
     initial_state = {
@@ -109,9 +121,24 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         "reviewed_by": None,
         "is_approved": False,
         "status": "processing_rules",
+        "tokens_prompt": 0,
+        "tokens_completion": 0,
+        "tokens_total": 0,
     }
     try:
-        onboarding_flow.invoke(initial_state, config=config)
+        final_state = onboarding_flow.invoke(initial_state, config=config)
+        elapsed_sec = round(time.perf_counter() - t0, 2)
+        
+        prompt_tokens = final_state.get("tokens_prompt", 0)
+        completion_tokens = final_state.get("tokens_completion", 0)
+        
+        supabase.table("workflow_runs").update({
+            "execution_time_seconds": elapsed_sec,
+            "tokens_prompt": prompt_tokens,
+            "tokens_completion": completion_tokens,
+            "tokens_total": prompt_tokens + completion_tokens,
+            "attempt_number": final_state.get("attempt_count", 1)
+        }).eq("request_id", request_id).execute()
         logger.info("⏸️ [Agent Workflow] Paused at approval gate for %s", request_id)
     except Exception as e:
         logger.error("❌ [Agent Workflow] Crashed for %s: %s", request_id, str(e))
@@ -291,17 +318,27 @@ def trigger_plan_generation(request_id: str, background_tasks: BackgroundTasks):
 @app.post("/onboarding/requests/{request_id}/review")
 def review_onboarding_plan(request_id: str, payload: ReviewPayload):
     """Resumes the workflow, rehydrating from Supabase if thread state was lost in memory."""
+    t0 = time.perf_counter()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    reviewer = payload.reviewed_by or "IT_ADMIN"
+
     config = {"configurable": {"thread_id": request_id}}
     state_snapshot = onboarding_flow.get_state(config)
 
     resume_data = {
         "action": payload.action,
         "note": payload.note or "",
-        "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+        "reviewed_by": reviewer,
         "approved_discretionary_ids": payload.approved_discretionary_ids,
     }
 
     try:
+        supabase.table("workflow_runs").update({
+            "review_action": payload.action,
+            "reviewed_by": reviewer,
+            "reviewed_at": now_iso,
+        }).eq("request_id", request_id).execute()
+
         if not state_snapshot.tasks:
             req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
             if not req_res.data:
@@ -343,11 +380,40 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
                 "reviewed_by": payload.reviewed_by or "IT_ADMIN",
                 "is_approved": (payload.action == "approve"),
                 "status": "approved" if payload.action == "approve" else "revision_requested",
+                "tokens_prompt": run_data.get("tokens_prompt", 0),
+                "tokens_completion": run_data.get("tokens_completion", 0),
+                "tokens_total": run_data.get("tokens_total", 0),
             }
             onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
             final_state = onboarding_flow.invoke(None, config=config)
         else:
             final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+
+        if payload.action == "approve":
+            req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
+            if req_data and req_data.get("created_at"):
+                created_dt = datetime.fromisoformat(req_data["created_at"].replace("Z", "+00:00"))
+                lead_time_sec = round((datetime.now(timezone.utc) - created_dt).total_seconds(), 2)
+            else:
+                lead_time_sec = 0.0
+
+            supabase.table("onboarding_requests").update({
+                "total_lead_time_seconds": lead_time_sec,
+                "finalized_at": now_iso,
+            }).eq("request_id", request_id).execute()
+
+        elif payload.action == "regenerate":
+            elapsed_sec = round(time.perf_counter() - t0, 2)
+            prompt_tokens = final_state.get("tokens_prompt", 0)
+            comp_tokens = final_state.get("tokens_completion", 0)
+
+            supabase.table("workflow_runs").update({
+                "execution_time_seconds": elapsed_sec,
+                "tokens_prompt": prompt_tokens,
+                "tokens_completion": comp_tokens,
+                "tokens_total": prompt_tokens + comp_tokens,
+                "attempt_number": final_state.get("attempt_count", 2),
+            }).eq("request_id", request_id).execute()
 
         return {
             "status": "success",
@@ -356,4 +422,58 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
         }
     except Exception as e:
         logger.error("Review processing failed for %s: %s", request_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/analytics/kpis", response_model=KPIResponse)
+def get_onboarding_kpis():
+    try:
+        # Fetch requests with runs
+        reqs = supabase.table("onboarding_requests").select("*, workflow_runs(*)").execute().data or []
+        runs = supabase.table("workflow_runs").select("*").execute().data or []
+        
+        total_runs = len(runs)
+        completed_reqs = [r for r in reqs if r.get("status") == "completed"]
+        
+        # 1. Token Metrics
+        total_tokens = sum(r.get("tokens_total", 0) for r in runs)
+        avg_tokens = round(total_tokens / len(reqs), 1) if reqs else 0.0
+        prompt_tokens = sum(r.get("tokens_prompt", 0) for r in runs)
+        comp_tokens = sum(r.get("tokens_completion", 0) for r in runs)
+
+        # 2. Execution Time Metrics
+        durations = [float(r.get("execution_time_seconds", 0)) for r in runs if r.get("execution_time_seconds")]
+        avg_agent_sec = round(sum(durations) / len(durations), 2) if durations else 0.0
+        
+        lead_times = [float(r.get("total_lead_time_seconds", 0)) for r in completed_reqs if r.get("total_lead_time_seconds")]
+        avg_lead_sec = round(sum(lead_times) / len(lead_times), 2) if lead_times else 0.0
+
+        # 3. HITL Pass Rate
+        first_pass_approved = sum(
+            1 for r in runs 
+            if r.get("review_action") == "approve" and r.get("attempt_number") == 1
+        )
+        total_first_reviews = sum(
+            1 for r in runs 
+            if r.get("review_action") in ["approve", "regenerate"] and r.get("attempt_number") == 1
+        )
+        first_pass_rate = round((first_pass_approved / total_first_reviews) * 100, 1) if total_first_reviews else 100.0
+        
+        manual_interventions = sum(1 for r in reqs if r.get("status") == "requires_manual_intervention")
+        escalation_rate = round((manual_interventions / len(reqs)) * 100, 1) if reqs else 0.0
+
+        return {
+            "total_onboarded": len(completed_reqs),
+            "avg_tokens_per_employee": avg_tokens,
+            "token_usage_breakdown": {
+                "prompt": prompt_tokens,
+                "completion": comp_tokens,
+                "total": total_tokens
+            },
+            "avg_agent_execution_seconds": avg_agent_sec,
+            "avg_total_lead_time_seconds": avg_lead_sec,
+            "first_pass_approval_rate": first_pass_rate,
+            "escalation_rate": escalation_rate,
+            "recent_runs": runs[-15:],
+        }
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -181,6 +181,9 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
         )
         prompt += f"\n\n### IT REVIEWER REVISION REQUESTS (HARDWARE / POLICIES)\n{formatted_feedback}\nAdjust the hardware and shipping configuration strictly to satisfy this feedback."
 
+    prompt_tokens = 0
+    completion_tokens = 0
+
     try:
         response = ollama.chat(
             model=OLLAMA_MODEL,
@@ -188,6 +191,8 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
             format=OnboardingPlanOutput.model_json_schema(),
             options={"temperature": 0.1, "num_ctx": 4096},
         )
+        prompt_tokens += response.get("prompt_eval_count", 0)
+        completion_tokens += response.get("eval_count", 0)
         raw_content = response.get("message", {}).get("content", "").strip()
     except Exception as e:
         logger.warning("Grammar-constrained inference failed (%s). Falling back to generic JSON mode.", e)
@@ -206,6 +211,8 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
             format="json",
             options={"temperature": 0.1, "num_ctx": 4096},
         )
+        prompt_tokens += response.get("prompt_eval_count", 0)
+        completion_tokens += response.get("eval_count", 0)
         raw_content = response.get("message", {}).get("content", "").strip()
 
     try:
@@ -215,10 +222,17 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
         raise ve
 
     ai_plan = validated_plan.model_dump()
+
+    current_prompt = state.get("tokens_prompt", 0) + prompt_tokens
+    current_completion = state.get("tokens_completion", 0) + completion_tokens
+
     return {
         "suggested_hardware": ai_plan.get("hardware_provisioning", {}),
         "flagged_exceptions": ai_plan.get("flagged_exceptions", []),
         "policy_tags": ai_plan.get("policy_citations", []),
+        "tokens_prompt": current_prompt,
+        "tokens_completion": current_completion,
+        "tokens_total": current_prompt + current_completion,
     }
 
 def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
@@ -248,6 +262,10 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
                     "flagged_exceptions": state["flagged_exceptions"],
                 }
             ],
+            "tokens_prompt": state.get("tokens_prompt", 0),
+            "tokens_completion": state.get("tokens_completion", 0),
+            "tokens_total": state.get("tokens_total", 0),
+            "attempt_number": state.get("attempt_count", 1),
         }
     ).execute()
 
@@ -264,6 +282,9 @@ def discretionary_licensing_node(state: OnboardingState) -> dict[str, Any]:
     feedback = state.get("it_feedback", [])
     catalog = state.get("software_catalog", [])
     sql_rules = state.get("sql_rules", [])
+
+    prompt_tokens = 0
+    completion_tokens = 0
 
     print("\n" + "=" * 50)
     print("🔍 [DEBUG: discretionary_licensing_node] INPUT STATE:")
@@ -341,6 +362,10 @@ Return strictly valid JSON matching the schema."""
             format=DiscretionaryListOutput.model_json_schema(),
             options={"temperature": 0.0, "num_ctx": 2048},
         )
+
+        prompt_tokens += response.get("prompt_eval_count", 0)
+        completion_tokens += response.get("eval_count", 0)
+
         raw_output = response.get("message", {}).get("content", "").strip()
         print(f"\n🤖 [DEBUG] RAW OLLAMA RESPONSE:\n{raw_output}\n")
         parsed = DiscretionaryListOutput.model_validate_json(raw_output)
@@ -366,7 +391,15 @@ Return strictly valid JSON matching the schema."""
 
     print(f"\n📦 [DEBUG] FINAL DISCRETIONARY OUTPUT: {valid_proposals}")
     print("=" * 50 + "\n")
-    return {"discretionary_licenses": valid_proposals}
+
+    current_prompt = state.get("tokens_prompt", 0) + prompt_tokens
+    current_completion = state.get("tokens_completion", 0) + completion_tokens
+
+    return {"discretionary_licenses": valid_proposals,
+            "tokens_prompt": current_prompt,
+            "tokens_completion": current_completion,
+            "tokens_total": current_prompt + current_completion,
+    }
 
 # --- Deterministic DB Execution Nodes ---
 

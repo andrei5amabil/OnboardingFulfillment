@@ -72,10 +72,13 @@ Extract structured JSON matching the requested schema from the document streams 
         track_a_text: str,
         track_b_text: str,
         model: str | None = None,
-    ) -> Union[
-        ContractExtractionSchema,
-        NationalIDExtractionSchema,
-        MedicalClearanceExtractionSchema,
+    ) -> tuple[
+        Union[
+            ContractExtractionSchema,
+            NationalIDExtractionSchema,
+            MedicalClearanceExtractionSchema,
+        ],
+        dict[str, int],
     ]:
         schema_cls = DOCUMENT_SCHEMA_MAP[doc_type]
         judge_model = model or OLLAMA_JUDGE_MODEL
@@ -83,6 +86,8 @@ Extract structured JSON matching the requested schema from the document streams 
 
         logger.info(f"\n--- ⚖️ [TRACK C ARBITRATION] Model='{judge_model}' | Target='{schema_cls.__name__}' ---")
         t0 = time.time()
+        prompt_tokens = 0
+        completion_tokens = 0
 
         # Try 1: Structured grammar constraint
         try:
@@ -92,17 +97,19 @@ Extract structured JSON matching the requested schema from the document streams 
                 format=schema_cls.model_json_schema(),
                 options={"temperature": 0.0, "num_ctx": 2048},
             )
+            prompt_tokens += response.get("prompt_eval_count", 0)
+            completion_tokens += response.get("eval_count", 0)
+
             msg = response.get("message", {})
-            # Read content, with fallback to thinking if content is empty
             raw_content = msg.get("content", "").strip() or msg.get("thinking", "").strip()
             raw_json = extract_json_block(raw_content)
 
-            logger.info(f"   └── Track C completed in {time.time() - t0:.2f}s")
+            logger.info(f"   └── Track C completed in {time.time() - t0:.2f}s | Tokens: {prompt_tokens + completion_tokens}")
             logger.info(f">>> [RAW TRACK C JSON]:\n{raw_json}")
 
             validated = schema_cls.model_validate_json(raw_json)
             logger.info(f">>> ✅ [VALIDATED {schema_cls.__name__}]:\n{validated.model_dump_json(indent=2)}\n" + "=" * 60)
-            return validated
+            return validated, {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
 
         except Exception as e:
             logger.warning(f"   └── ⚠️ Grammar parsing failed ({e}). Retrying in generic JSON mode...")
@@ -118,6 +125,9 @@ Extract structured JSON matching the requested schema from the document streams 
                 format="json",
                 options={"temperature": 0.0, "num_ctx": 2048},
             )
+            prompt_tokens += response.get("prompt_eval_count", 0)
+            completion_tokens += response.get("eval_count", 0)
+
             msg = response.get("message", {})
             raw_content = msg.get("content", "").strip() or msg.get("thinking", "").strip()
             raw_json = extract_json_block(raw_content)
@@ -125,8 +135,7 @@ Extract structured JSON matching the requested schema from the document streams 
 
             validated = schema_cls.model_validate_json(raw_json)
             logger.info(f">>> ✅ [VALIDATED (FALLBACK)]:\n{validated.model_dump_json(indent=2)}\n" + "=" * 60)
-            return validated
+            return validated, {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
         except Exception as e:
             logger.error(f"❌ Track C arbitration completely failed for {doc_type.value}: {e}")
-            # Fallback to an empty instance of the schema to avoid crashing the entire pipeline
-            return schema_cls()
+            return schema_cls(), {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}

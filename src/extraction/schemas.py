@@ -3,6 +3,12 @@ from enum import Enum
 from typing import Optional, Union
 from pydantic import BaseModel, Field
 
+class ExtractionMetrics(BaseModel):
+    execution_time_seconds: float = 0.0
+    tokens_prompt: int = 0
+    tokens_completion: int = 0
+    tokens_total: int = 0
+    fast_path_used: bool = False
 
 class DocumentType(str, Enum):
     CONTRACT = "contract"
@@ -92,6 +98,7 @@ class ExtractionResponse(BaseModel):
     document_type: DocumentType
     filename: str
     confidence_flags: list[str] = Field(default_factory=list)
+    metrics: ExtractionMetrics = Field(default_factory=ExtractionMetrics)
     data: Union[
         ContractExtractionSchema,
         NationalIDExtractionSchema,

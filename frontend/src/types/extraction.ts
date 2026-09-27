@@ -26,6 +26,14 @@ export interface MedicalClearanceData {
   issue_date?: string | null;
 }
 
+export interface ExtractionMetrics {
+  execution_time_seconds: number;
+  tokens_prompt: number;
+  tokens_completion: number;
+  tokens_total: number;
+  fast_path_used: boolean;
+}
+
 export type ExtractedData = ContractData | NationalIDData | MedicalClearanceData;
 
 export interface ExtractionResponse {
@@ -33,5 +41,6 @@ export interface ExtractionResponse {
   document_type: DocumentType;
   filename: string;
   confidence_flags: string[];
+  metrics: ExtractionMetrics;
   data: ExtractedData;
 }
