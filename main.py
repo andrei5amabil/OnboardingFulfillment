@@ -3,7 +3,7 @@ from urllib import response
 import uuid
 from typing import Literal, Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File, Form, UploadFile
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File, Form, UploadFile, Depends
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
 from postgrest import APIError
@@ -20,11 +20,10 @@ from src.extraction.schemas import DocumentType, ExtractionResponse
 from src.extraction.service import DocumentExtractionService
 from fastapi.middleware.cors import CORSMiddleware
 import time
+from src.auth.dependencies import CurrentUser, RequireRoles, get_current_user
 
 load_dotenv()
 logger = logging.getLogger("uvicorn.error")
-
-
 
 app = FastAPI(title="FastAPI + Supabase Setup")
 
@@ -210,6 +209,7 @@ def check_sb_connection():
 def extract_document(
     file: UploadFile = File(...),
     document_type: DocumentType = Form(...),
+    user: CurrentUser = Depends(RequireRoles(["hr_manager"])),
 ):
     """Processes an uploaded document (PDF or Image) through Track A + Track B and returns arbitrated data."""
     try:
@@ -229,7 +229,11 @@ def extract_document(
         )
 
 @app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
-def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
+def create_onboarding_request(
+    item: Request, 
+    background_tasks: BackgroundTasks, 
+    user: CurrentUser = Depends(RequireRoles(["hr_manager"])),
+):
     try:
         employee_id = generate_employee_id()
         while True:
@@ -267,7 +271,7 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
             "location": item.location,
             "work_location": item.work_location,
             "notes": item.notes,
-            "hr_manager_id": item.hr_manager_id,
+            "hr_manager_id": item.hr_manager_id, #CHANGE TO user.employee_id / user.user_id
             "status": "processing_rules",
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
@@ -291,7 +295,11 @@ def create_onboarding_request(item: Request, background_tasks: BackgroundTasks):
         )
 
 @app.get("/onboarding/requests", response_model=list[DB_Request])
-def provide_requests(status: Optional[str] = None, limit: int = 20):
+def provide_requests(
+    status: Optional[str] = None,
+    limit: int = 20,
+    user: CurrentUser = Depends(RequireRoles(["hr_manager", "it_manager", "admin"])),
+):
     try:
         query = (
             supabase.table("onboarding_requests")
@@ -306,7 +314,11 @@ def provide_requests(status: Optional[str] = None, limit: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/onboarding/requests/{request_id}/generate-plan")
-def trigger_plan_generation(request_id: str, background_tasks: BackgroundTasks):
+def trigger_plan_generation(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(RequireRoles(["hr_manager", "it_manager"])),
+):
     """Manual fallback to initiate or retry plan generation."""
     supabase.table("onboarding_requests").update(
         {"status": "processing_rules"}
@@ -316,7 +328,11 @@ def trigger_plan_generation(request_id: str, background_tasks: BackgroundTasks):
     return {"status": "success", "message": f"Plan generation queued for {request_id}"}
     
 @app.post("/onboarding/requests/{request_id}/review")
-def review_onboarding_plan(request_id: str, payload: ReviewPayload):
+def review_onboarding_plan(
+    request_id: str, 
+    payload: ReviewPayload,
+    user: CurrentUser = Depends(RequireRoles(["it_manager"]))
+):
     """Resumes the workflow, rehydrating from Supabase if thread state was lost in memory."""
     t0 = time.perf_counter()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -333,11 +349,21 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
     }
 
     try:
-        supabase.table("workflow_runs").update({
-            "review_action": payload.action,
-            "reviewed_by": reviewer,
-            "reviewed_at": now_iso,
-        }).eq("request_id", request_id).execute()
+        latest_run = (
+            supabase.table("workflow_runs")
+            .select("run_id")
+            .eq("request_id", request_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if latest_run.data:
+            current_run_id = latest_run.data[0]["run_id"]
+            supabase.table("workflow_runs").update({
+                "review_action": payload.action,
+                "reviewed_by": reviewer,
+                "reviewed_at": now_iso,
+            }).eq("run_id", current_run_id).execute()
 
         if not state_snapshot.tasks:
             req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
@@ -374,10 +400,10 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
                 "policy_tags": run_data.get("policy_citations", [{}])[0].get("tags", []) if run_data.get("policy_citations") else [],
                 "flagged_exceptions": run_data.get("policy_citations", [{}])[0].get("flagged_exceptions", []) if run_data.get("policy_citations") else [],
                 "citations": [],
-                "attempt_count": 1,
+                "attempt_count": run_data.get("attempt_number", 1),
                 "it_feedback": [payload.note] if payload.note else [],
                 "review_action": payload.action,
-                "reviewed_by": payload.reviewed_by or "IT_ADMIN",
+                "reviewed_by": reviewer,
                 "is_approved": (payload.action == "approve"),
                 "status": "approved" if payload.action == "approve" else "revision_requested",
                 "tokens_prompt": run_data.get("tokens_prompt", 0),
@@ -407,13 +433,23 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
             prompt_tokens = final_state.get("tokens_prompt", 0)
             comp_tokens = final_state.get("tokens_completion", 0)
 
-            supabase.table("workflow_runs").update({
-                "execution_time_seconds": elapsed_sec,
-                "tokens_prompt": prompt_tokens,
-                "tokens_completion": comp_tokens,
-                "tokens_total": prompt_tokens + comp_tokens,
-                "attempt_number": final_state.get("attempt_count", 2),
-            }).eq("request_id", request_id).execute()
+            new_run = (
+                supabase.table("workflow_runs")
+                .select("run_id")
+                .eq("request_id", request_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if new_run.data:
+                new_run_id = new_run.data[0]["run_id"]
+                supabase.table("workflow_runs").update({
+                    "execution_time_seconds": elapsed_sec,
+                    "tokens_prompt": prompt_tokens,
+                    "tokens_completion": comp_tokens,
+                    "tokens_total": prompt_tokens + comp_tokens,
+                    "attempt_number": final_state.get("attempt_count", 2),
+                }).eq("run_id", new_run_id).execute()
 
         return {
             "status": "success",
@@ -425,7 +461,7 @@ def review_onboarding_plan(request_id: str, payload: ReviewPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/analytics/kpis", response_model=KPIResponse)
-def get_onboarding_kpis():
+def get_onboarding_kpis(user: CurrentUser = Depends(RequireRoles(["hr_manager", "it_manager", "admin"]))):
     try:
         # Fetch requests with runs
         reqs = supabase.table("onboarding_requests").select("*, workflow_runs(*)").execute().data or []
@@ -477,3 +513,56 @@ def get_onboarding_kpis():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/portal/me")
+def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire"]))):
+    """Returns onboarding and provisioned entitlement data for the logged-in employee."""
+    if not user.employee_id:
+        return {
+            "status": "pending_linking",
+            "message": "Your employee account has not been linked to an onboarding record yet. Please contact HR.",
+        }
+
+    # Fetch employee profile
+    emp_res = supabase.table("employees").select("*").eq("employee_id", user.employee_id).execute()
+    if not emp_res.data:
+        # Check onboarding request if not finalized into employees yet
+        req_res = supabase.table("onboarding_requests").select("*, workflow_runs(*)").eq("employee_id", user.employee_id).execute()
+        if not req_res.data:
+            raise HTTPException(status_code=404, detail="Employee record not found.")
+        
+        req = req_res.data[0]
+        latest_run = req.get("workflow_runs", [{}])[0] if req.get("workflow_runs") else {}
+        return {
+            "status": req.get("status"),
+            "employee_id": req.get("employee_id"),
+            "name": f"{req.get('first_name')} {req.get('last_name')}",
+            "role": req.get("role"),
+            "department": req.get("department"),
+            "start_date": req.get("start_date"),
+            "work_location": req.get("work_location"),
+            "hardware": latest_run.get("suggested_hardware", {}),
+            "software": latest_run.get("suggested_licenses", []),
+        }
+
+    emp = emp_res.data[0]
+    # Fetch active software licenses
+    licenses_res = (
+        supabase.table("license_assignments")
+        .select("assignment_id, status, assigned_at, software_products(name, vendor, license_type)")
+        .eq("employee_id", user.employee_id)
+        .execute()
+    )
+
+    return {
+        "status": emp.get("status"),
+        "employee_id": emp.get("employee_id"),
+        "name": f"{emp.get('first_name')} {emp.get('last_name')}",
+        "role": emp.get("role"),
+        "department": emp.get("department"),
+        "start_date": emp.get("start_date"),
+        "work_location": emp.get("work_location"),
+        "work_email": emp.get("work_email"),
+        "medical_clearance": emp.get("medical_clearance_status"),
+        "licenses": licenses_res.data or [],
+    }

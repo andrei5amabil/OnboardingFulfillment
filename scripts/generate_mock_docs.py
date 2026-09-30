@@ -84,7 +84,7 @@ def generate_candidate_persona(force_medically_unfit: bool = False):
         "cnp": cnp,
         "department": department,
         "role": role,
-        "manager_id": f"MGR-{random.randint(100, 999)}",
+        "manager_id": f"EMP-0042",
         "start_date": start_date,
         "work_location": random.choice(["remote", "hybrid", "on-site"]),
         "employment_type": "full_time",

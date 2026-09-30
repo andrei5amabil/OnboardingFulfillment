@@ -239,8 +239,8 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
     """Persists workflow run artifacts and places the request into approval state."""
     request_id = state["request_id"]
 
-    # Clear stale runs
-    supabase.table("workflow_runs").delete().eq("request_id", request_id).execute()
+    # Keep old runs for traceability
+    #supabase.table("workflow_runs").delete().eq("request_id", request_id).execute()
 
     # Commit generated plan
     supabase.table("workflow_runs").insert(

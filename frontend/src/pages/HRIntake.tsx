@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DocumentIngestion } from '../components/DocumentIngestion';
+import { fetchWithAuth } from '../lib/api';
 import {
   DEPARTMENTS,
   DEPARTMENT_ROLE_MAPPING,
@@ -17,9 +18,6 @@ import type { DocumentType, ExtractionResponse, ContractData, NationalIDData, Me
 import {
   User,
   Briefcase,
-  MapPin,
-  Calendar,
-  Building,
   HeartPulse,
   Send,
   Loader2,
@@ -170,7 +168,7 @@ export const HrIntakePage: React.FC = () => {
     };
 
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/requests`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

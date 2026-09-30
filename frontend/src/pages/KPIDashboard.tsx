@@ -10,6 +10,7 @@ import {
   ArrowUpRight 
 } from 'lucide-react';
 import type { KPIData } from '../types/analytics';
+import { fetchWithAuth } from '../lib/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -20,7 +21,7 @@ export const KPIDashboard: React.FC = () => {
   const fetchKPIs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/analytics/kpis`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/analytics/kpis`);
       if (res.ok) {
         setData(await res.json());
       }

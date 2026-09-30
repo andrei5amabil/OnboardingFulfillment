@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { fetchWithAuth } from '../lib/api';
 import {
   RotateCw,
   CheckCircle,
@@ -34,7 +35,7 @@ export const ITApprovalsPage: React.FC = () => {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/requests`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests`);
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const data: OnboardingRequest[] = await res.json();
 
@@ -120,7 +121,7 @@ export const ITApprovalsPage: React.FC = () => {
   const handleGeneratePlan = async (requestId: string) => {
     setActionLoading((prev) => ({ ...prev, [requestId]: true }));
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/requests/${requestId}/generate-plan`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests/${requestId}/generate-plan`, {
         method: 'POST',
       });
       if (!res.ok) throw new Error('Failed to queue plan generation.');
@@ -142,7 +143,7 @@ export const ITApprovalsPage: React.FC = () => {
     };
 
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/requests/${requestId}/review`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests/${requestId}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

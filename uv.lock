@@ -1966,10 +1966,12 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
+    { name = "cryptography" },
     { name = "fastapi", extra = ["standard"] },
     { name = "langchain-text-splitters" },
     { name = "langgraph" },
     { name = "ollama" },
+    { name = "pyjwt" },
     { name = "pymupdf" },
     { name = "pytesseract" },
     { name = "python-dotenv" },
@@ -1984,10 +1986,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "chromadb", specifier = ">=1.5.9" },
+    { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "langchain-text-splitters", specifier = ">=1.1.2" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "ollama", specifier = ">=0.6.2" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pymupdf", specifier = ">=1.28.2" },
     { name = "pytesseract", specifier = ">=0.3.13" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
