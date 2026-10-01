@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileSignature, CreditCard, HeartPulse, Layers, AlertTriangle } from 'lucide-react';
 import { DocumentDropzone } from './DocumentDropzone';
 import type { DocumentType, ExtractionResponse } from '../types/extraction';
+import {fetchWithAuth} from '../lib/api';
 
 interface DocumentIngestionProps {
   apiBaseUrl: string;
@@ -48,7 +49,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
     setScanningMap((prev) => ({ ...prev, [docType]: true }));
 
     try {
-      const response = await fetch(`${apiBaseUrl}/onboarding/extract-document`, {
+      const response = await fetchWithAuth(`${apiBaseUrl}/onboarding/extract-document`, {
         method: 'POST',
         body: formData,
       });
@@ -96,19 +97,6 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
             Upload candidate files to auto-populate identity, contract, and compliance details.
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            const queue = (Object.keys(files) as DocumentType[]).filter((key) => files[key]);
-            scanBatch(queue);
-          }}
-          disabled={activeFilesCount === 0 || isAnyScanning}
-          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors self-start sm:self-auto"
-        >
-          <Layers className="w-4 h-4 text-indigo-400" />
-          Scan All Uploaded ({activeFilesCount} ready)
-        </button>
       </div>
 
       {alerts.length > 0 && (
@@ -162,6 +150,18 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
           isSuccess={successMap.medical_clearance}
           disabled={isAnyScanning}
         />
+        <button
+          type="button"
+          onClick={() => {
+            const queue = (Object.keys(files) as DocumentType[]).filter((key) => files[key]);
+            scanBatch(queue);
+          }}
+          disabled={activeFilesCount === 0 || isAnyScanning}
+          className="col-span-1 md:col-span-3 w-full flex items-center justify-center gap-2 py-3 px-4 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+        >
+          <Layers className="w-4 h-4 text-indigo-400" />
+          Scan All Uploaded ({activeFilesCount} ready)
+        </button>
       </div>
     </div>
   );

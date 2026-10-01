@@ -29,39 +29,47 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+// 1. Initial form state blueprint
+const getInitialFormData = () => ({
+  first_name: '',
+  last_name: '',
+  national_id: '',
+  department: DEPARTMENTS[0] as string,
+  role: DEPARTMENT_ROLE_MAPPING[DEPARTMENTS[0]][0],
+  start_date: new Date().toISOString().split('T')[0],
+  employment_type: EMPLOYMENT_TYPE_OPTIONS[0],
+  location: LOCATION_OPTIONS[0],
+  work_location: WORK_LOCATION_OPTIONS[0],
+  manager_id: '',
+  shipping_address: '',
+  contact_phone: '',
+  medical_clearance_status: false,
+  medical_clearance_date: new Date().toISOString().split('T')[0],
+  notes: '',
+  hr_manager_id: 'EMP-0042',
+});
+
+const INITIAL_SCANNED_DOCS = {
+  contract: {},
+  national_id: {},
+  medical_clearance: {},
+};
+
 export const HrIntakePage: React.FC = () => {
+  // Key to force reset DocumentIngestion component
+  const [ingestionKey, setIngestionKey] = useState<number>(0);
+
   // Scanned docs cache for cross-validation
-  const [scannedDocuments, setScannedDocuments] = useState<{
+  const [, setScannedDocuments] = useState<{
     contract: Record<string, any>;
     national_id: Record<string, any>;
     medical_clearance: Record<string, any>;
-  }>({
-    contract: {},
-    national_id: {},
-    medical_clearance: {},
-  });
+  }>(INITIAL_SCANNED_DOCS);
 
   const [validationAlerts, setValidationAlerts] = useState<ValidationAlert[]>([]);
 
   // Form State
-  const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    national_id: '',
-    department: DEPARTMENTS[0] as string,
-    role: DEPARTMENT_ROLE_MAPPING[DEPARTMENTS[0]][0],
-    start_date: new Date().toISOString().split('T')[0],
-    employment_type: EMPLOYMENT_TYPE_OPTIONS[0],
-    location: LOCATION_OPTIONS[0],
-    work_location: WORK_LOCATION_OPTIONS[0],
-    manager_id: '',
-    shipping_address: '',
-    contact_phone: '',
-    medical_clearance_status: false,
-    medical_clearance_date: new Date().toISOString().split('T')[0],
-    notes: '',
-    hr_manager_id: 'EMP-0042',
-  });
+  const [formData, setFormData] = useState(getInitialFormData());
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResponse, setSubmitResponse] = useState<{ status: 'success' | 'error'; message: string; data?: any } | null>(null);
@@ -72,7 +80,6 @@ export const HrIntakePage: React.FC = () => {
 
     setScannedDocuments((prev) => {
       const updated = { ...prev, [docType]: extracted };
-      // Re-run Cross-Validation
       const alerts = validateCrossDocuments(
         updated.contract,
         updated.national_id,
@@ -168,7 +175,7 @@ export const HrIntakePage: React.FC = () => {
     };
 
     try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests`, {
+      const res = await fetchWithAuth('/onboarding/requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -182,6 +189,13 @@ export const HrIntakePage: React.FC = () => {
         message: `Onboarding request ${data.data?.request_id || ''} created for ${payload.first_name} ${payload.last_name}! Workflow initialized.`,
         data: data.data,
       });
+
+      // --- CLEAR ALL FIELDS & DROPZONES ---
+      setFormData(getInitialFormData());
+      setScannedDocuments(INITIAL_SCANNED_DOCS);
+      setValidationAlerts([]);
+      setIngestionKey((prev) => prev + 1); // Remounts DocumentIngestion to clear files
+
     } catch (err: any) {
       setSubmitResponse({
         status: 'error',
@@ -196,7 +210,6 @@ export const HrIntakePage: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-100">
           📝 Assisted Employee Onboarding Intake
@@ -206,8 +219,9 @@ export const HrIntakePage: React.FC = () => {
         </p>
       </div>
 
-      {/* 1. Document Ingestion Dropzones */}
+      {/* 1. Document Ingestion Dropzones with dynamic key */}
       <DocumentIngestion
+        key={ingestionKey}
         apiBaseUrl={API_BASE_URL}
         onExtractionSuccess={handleExtractionSuccess}
       />
