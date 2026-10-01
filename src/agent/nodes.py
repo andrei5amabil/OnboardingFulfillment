@@ -6,7 +6,6 @@ from typing import Any, Optional
 import json
 
 from dotenv import load_dotenv
-import ollama
 from pydantic import BaseModel, Field, ValidationError
 
 from src.agent.state import OnboardingState
@@ -14,6 +13,9 @@ from src.db.client import supabase
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
 from langgraph.types import interrupt
 from pathlib import Path
+
+from langchain_core.messages import HumanMessage
+from langchain_ollama import ChatOllama
 
 env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
@@ -184,42 +186,31 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
     prompt_tokens = 0
     completion_tokens = 0
 
+    llm = ChatOllama(
+        model=OLLAMA_MODEL,
+        temperature=0.1,
+        num_ctx=4096,
+    )
+    structured_llm = llm.with_structured_output(OnboardingPlanOutput, include_raw=True)
+
     try:
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            format=OnboardingPlanOutput.model_json_schema(),
-            options={"temperature": 0.1, "num_ctx": 4096},
-        )
-        prompt_tokens += response.get("prompt_eval_count", 0)
-        completion_tokens += response.get("eval_count", 0)
-        raw_content = response.get("message", {}).get("content", "").strip()
+        response = structured_llm.invoke([HumanMessage(content=prompt)])
+        validated_plan: OnboardingPlanOutput = response["parsed"]
+
+        if not validated_plan:
+            raise ValueError("Structured model output returned None.")
+
+        raw_msg = response.get("raw")
+        if raw_msg and getattr(raw_msg, "usage_metadata", None):
+            prompt_tokens += raw_msg.usage_metadata.get("input_tokens", 0)
+            completion_tokens += raw_msg.usage_metadata.get("output_tokens", 0)
+        elif raw_msg and getattr(raw_msg, "response_metadata", None):
+            prompt_tokens += raw_msg.response_metadata.get("prompt_eval_count", 0)
+            completion_tokens += raw_msg.response_metadata.get("eval_count", 0)
+
     except Exception as e:
-        logger.warning("Grammar-constrained inference failed (%s). Falling back to generic JSON mode.", e)
-        raw_content = ""
-
-    # Fallback to generic JSON if grammar fails or returns empty
-    if not raw_content:
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{prompt}\n\nRespond strictly with a JSON object matching keys: 'hardware_provisioning', 'flagged_exceptions', 'policy_citations'.",
-                }
-            ],
-            format="json",
-            options={"temperature": 0.1, "num_ctx": 4096},
-        )
-        prompt_tokens += response.get("prompt_eval_count", 0)
-        completion_tokens += response.get("eval_count", 0)
-        raw_content = response.get("message", {}).get("content", "").strip()
-
-    try:
-        validated_plan = OnboardingPlanOutput.model_validate_json(raw_content)
-    except ValidationError as ve:
-        logger.error("Hardware planning schema validation failed: %s\nRaw output: %s", ve.json(), raw_content)
-        raise ve
+        logger.error("Structured hardware planning inference failed: %s", e)
+        raise e
 
     ai_plan = validated_plan.model_dump()
 
@@ -356,19 +347,28 @@ Return strictly valid JSON matching the schema."""
     print("-" * 40)
 
     try:
-        response = ollama.chat(
+        llm = ChatOllama(
             model=OLLAMA_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            format=DiscretionaryListOutput.model_json_schema(),
-            options={"temperature": 0.0, "num_ctx": 2048},
+            temperature=0.0,
+            num_ctx=2048,
         )
+        structured_llm = llm.with_structured_output(DiscretionaryListOutput, include_raw=True)
+        response = structured_llm.invoke([HumanMessage(content=prompt)])
 
-        prompt_tokens += response.get("prompt_eval_count", 0)
-        completion_tokens += response.get("eval_count", 0)
+        parsed: DiscretionaryListOutput = response["parsed"]
+        if not parsed:
+            raise ValueError("Parsed output returned None.")
 
-        raw_output = response.get("message", {}).get("content", "").strip()
-        print(f"\n🤖 [DEBUG] RAW OLLAMA RESPONSE:\n{raw_output}\n")
-        parsed = DiscretionaryListOutput.model_validate_json(raw_output)
+        raw_msg = response.get("raw")
+        if raw_msg and getattr(raw_msg, "usage_metadata", None):
+            prompt_tokens += raw_msg.usage_metadata.get("input_tokens", 0)
+            completion_tokens += raw_msg.usage_metadata.get("output_tokens", 0)
+        elif raw_msg and getattr(raw_msg, "response_metadata", None):
+            prompt_tokens += raw_msg.response_metadata.get("prompt_eval_count", 0)
+            completion_tokens += raw_msg.response_metadata.get("eval_count", 0)
+
+        print(f"\n🤖 [DEBUG] PARSED DISCRETIONARY RESPONSE:\n{parsed.model_dump_json(indent=2)}\n")
+
     except Exception as e:
         print(f"❌ [DEBUG] Parsing/Ollama invocation failed: {e}")
         print("=" * 50 + "\n")
@@ -395,10 +395,11 @@ Return strictly valid JSON matching the schema."""
     current_prompt = state.get("tokens_prompt", 0) + prompt_tokens
     current_completion = state.get("tokens_completion", 0) + completion_tokens
 
-    return {"discretionary_licenses": valid_proposals,
-            "tokens_prompt": current_prompt,
-            "tokens_completion": current_completion,
-            "tokens_total": current_prompt + current_completion,
+    return {
+        "discretionary_licenses": valid_proposals,
+        "tokens_prompt": current_prompt,
+        "tokens_completion": current_completion,
+        "tokens_total": current_prompt + current_completion,
     }
 
 # --- Deterministic DB Execution Nodes ---

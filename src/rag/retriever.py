@@ -2,9 +2,10 @@ import pickle
 import re
 from pathlib import Path
 from typing import Any
-import chromadb
-from chromadb.utils import embedding_functions
 from sentence_transformers import CrossEncoder
+
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # Anchor paths relative to project root
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -28,15 +29,14 @@ class PolicyRetriever:
                 f"Index files missing at {CHROMA_PATH}. Run 'python src/rag/etl.py' first."
             )
 
-        # 1. Initialize ChromaDB client & dense embedder
-        self.chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.embed_fn = (
-            embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="all-MiniLM-L6-v2"
-            )
+        # 1. Initialize LangChain Chroma vector store & dense embedder
+        self.embed_fn = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2"
         )
-        self.collection = self.chroma_client.get_collection(
-            name=COLLECTION_NAME, embedding_function=self.embed_fn
+        self.vector_store = Chroma(
+            collection_name=COLLECTION_NAME,
+            embedding_function=self.embed_fn,
+            persist_directory=str(CHROMA_PATH),
         )
 
         # 2. Load serialized BM25 index & corpus map
@@ -55,11 +55,14 @@ class PolicyRetriever:
         self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
     def _dense_search(self, query: str, top_k: int = 15) -> list[tuple[str, int]]:
-        """Dense semantic search using ChromaDB cosine similarity."""
-        results = self.collection.query(query_texts=[query], n_results=top_k)
-        ids = results["ids"][0] if results["ids"] else []
-        # Return tuples of (chunk_id, 1-based rank)
-        return [(chunk_id, rank + 1) for rank, chunk_id in enumerate(ids)]
+        """Dense semantic search using LangChain Chroma cosine similarity."""
+        docs = self.vector_store.similarity_search(query, k=top_k)
+        
+        return [
+            (doc.id or doc.metadata.get("id"), rank + 1)
+            for rank, doc in enumerate(docs)
+            if doc.id or doc.metadata.get("id")
+        ]
 
     def _sparse_search(self, query: str, top_k: int = 15) -> list[tuple[str, int]]:
         """Exact keyword matching using BM25Okapi."""
@@ -139,7 +142,6 @@ class PolicyRetriever:
         )
 
         # Step 5: Parent Document Deduplication
-        # Multiple matching child chunks from the same parent section collapse into one parent citation
         seen_parents = set()
         citations = []
 
@@ -149,7 +151,6 @@ class PolicyRetriever:
                 continue
             seen_parents.add(parent_id)
 
-            # Retrieve full parent section text
             parent_text = self.parent_store.get(
                 parent_id, meta.get("parent_content", "")
             )
