@@ -230,11 +230,8 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
     """Persists workflow run artifacts and places the request into approval state."""
     request_id = state["request_id"]
 
-    # Keep old runs for traceability
-    #supabase.table("workflow_runs").delete().eq("request_id", request_id).execute()
-
-    # Commit generated plan
-    supabase.table("workflow_runs").insert(
+    # Insert plan record and capture the generated run_id
+    insert_res = supabase.table("workflow_runs").insert(
         {
             "request_id": request_id,
             "suggested_licenses": state["suggested_licenses"],
@@ -260,11 +257,16 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
         }
     ).execute()
 
+    run_id = insert_res.data[0]["run_id"] if insert_res.data else None
+
     supabase.table("onboarding_requests").update(
         {"status": "pending_approval"}
     ).eq("request_id", request_id).execute()
 
-    return {"status": "pending_approval"}
+    return {
+        "status": "pending_approval",
+        "current_run_id": run_id,
+    }
 
 def discretionary_licensing_node(state: OnboardingState) -> dict[str, Any]:
     """Analyzes candidate notes against available catalog in isolation."""

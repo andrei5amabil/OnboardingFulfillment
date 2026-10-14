@@ -124,6 +124,9 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         "tokens_prompt": 0,
         "tokens_completion": 0,
         "tokens_total": 0,
+        "work_email": None,
+        "provisioning_error": None,
+        "current_run_id": None,
     }
     try:
         final_state = onboarding_flow.invoke(initial_state, config=config)
@@ -131,14 +134,18 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         
         prompt_tokens = final_state.get("tokens_prompt", 0)
         completion_tokens = final_state.get("tokens_completion", 0)
+        current_run_id = final_state.get("current_run_id")
         
-        supabase.table("workflow_runs").update({
-            "execution_time_seconds": elapsed_sec,
-            "tokens_prompt": prompt_tokens,
-            "tokens_completion": completion_tokens,
-            "tokens_total": prompt_tokens + completion_tokens,
-            "attempt_number": final_state.get("attempt_count", 1)
-        }).eq("request_id", request_id).execute()
+        # Target execution metrics strictly to this specific run
+        if current_run_id:
+            supabase.table("workflow_runs").update({
+                "execution_time_seconds": elapsed_sec,
+                "tokens_prompt": prompt_tokens,
+                "tokens_completion": completion_tokens,
+                "tokens_total": prompt_tokens + completion_tokens,
+                "attempt_number": final_state.get("attempt_count", 1)
+            }).eq("run_id", current_run_id).execute()
+        
         logger.info("⏸️ [Agent Workflow] Paused at approval gate for %s", request_id)
     except Exception as e:
         logger.error("❌ [Agent Workflow] Crashed for %s: %s", request_id, str(e))
@@ -354,18 +361,56 @@ def trigger_plan_generation(
 
     background_tasks.add_task(kickoff_agent_workflow, request_id)
     return {"status": "success", "message": f"Plan generation queued for {request_id}"}
+
+def resume_regeneration_workflow(
+    request_id: str, 
+    resume_data: dict, 
+    reconstructed_state: Optional[dict] = None
+):
+    """Executes plan regeneration in the background to avoid frontend request timeouts."""
+    t0 = time.perf_counter()
+    logger.info("▶️ [Agent Workflow] Starting regeneration for %s", request_id)
+    config = {"configurable": {"thread_id": request_id}}
+    
+    try:
+        if reconstructed_state:
+            onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
+            final_state = onboarding_flow.invoke(None, config=config)
+        else:
+            final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+
+        elapsed_sec = round(time.perf_counter() - t0, 2)
+        prompt_tokens = final_state.get("tokens_prompt", 0)
+        completion_tokens = final_state.get("tokens_completion", 0)
+        current_run_id = final_state.get("current_run_id")
+
+        if current_run_id:
+            supabase.table("workflow_runs").update({
+                "execution_time_seconds": elapsed_sec,
+                "tokens_prompt": prompt_tokens,
+                "tokens_completion": completion_tokens,
+                "tokens_total": prompt_tokens + completion_tokens,
+                "attempt_number": final_state.get("attempt_count", 2),
+            }).eq("run_id", current_run_id).execute()
+
+        logger.info("⏸️ [Agent Workflow] Regeneration complete, paused at approval gate for %s", request_id)
+
+    except Exception as e:
+        logger.error("❌ [Agent Workflow] Regeneration crashed for %s: %s", request_id, str(e))
+        logger.error(traceback.format_exc())
+        supabase.table("onboarding_requests").update(
+            {"status": "failed"}
+        ).eq("request_id", request_id).execute()
     
 @app.post("/onboarding/requests/{request_id}/review")
 def review_onboarding_plan(
     request_id: str, 
     payload: ReviewPayload,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(RequireRoles(["it_manager"]))
 ):
-    """Resumes the workflow, executing atomic provisioning or plan regeneration."""
-    t0 = time.perf_counter()
+    """Executes synchronous atomic provisioning on approval, or queues background regeneration."""
     now_iso = datetime.now(timezone.utc).isoformat()
-    
-    # 1. Resolve reviewer from authenticated JWT context
     reviewer = user.employee_id or payload.reviewed_by or "IT_ADMIN"
 
     config = {"configurable": {"thread_id": request_id}}
@@ -379,7 +424,7 @@ def review_onboarding_plan(
     }
 
     try:
-        # Record review decision on the latest workflow run
+        # 1. Update review notes on the latest completed run
         latest_run = (
             supabase.table("workflow_runs")
             .select("run_id")
@@ -392,11 +437,13 @@ def review_onboarding_plan(
             current_run_id = latest_run.data[0]["run_id"]
             supabase.table("workflow_runs").update({
                 "review_action": payload.action,
+                "it_notes": payload.note or "",
                 "reviewed_by": reviewer,
                 "reviewed_at": now_iso,
             }).eq("run_id", current_run_id).execute()
 
-        # Rehydrate state if memory checkpointer lost thread tasks
+        # Build rehydrated state fallback if in-memory checkpointer lost state
+        reconstructed_state = None
         if not state_snapshot.tasks:
             req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
             if not req_res.data:
@@ -443,13 +490,41 @@ def review_onboarding_plan(
                 "tokens_total": run_data.get("tokens_total", 0),
                 "work_email": None,
                 "provisioning_error": None,
+                "current_run_id": run_data.get("run_id"),
             }
+
+        # -------------------------------------------------------------
+        # PATH A: REGENERATE (Non-blocking background execution)
+        # -------------------------------------------------------------
+        if payload.action == "regenerate":
+            # Set request to processing so the UI displays the working spinner
+            supabase.table("onboarding_requests").update(
+                {"status": "processing_rules"}
+            ).eq("request_id", request_id).execute()
+
+            background_tasks.add_task(
+                resume_regeneration_workflow, 
+                request_id, 
+                resume_data, 
+                reconstructed_state
+            )
+
+            return {
+                "status": "success",
+                "action": "regenerate",
+                "workflow_status": "processing_rules",
+            }
+
+        # -------------------------------------------------------------
+        # PATH B: APPROVE (Synchronous deterministic RPC execution)
+        # -------------------------------------------------------------
+        if reconstructed_state:
             onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
             final_state = onboarding_flow.invoke(None, config=config)
         else:
             final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
 
-        # 2. Check for Transactional Rollback
+        # Check for rollback from RPC
         if final_state.get("status") == "provisioning_failed":
             err_msg = final_state.get("provisioning_error") or "Transaction rolled back during atomic provisioning."
             logger.error("❌ Atomic provisioning failed for %s: %s", request_id, err_msg)
@@ -458,42 +533,17 @@ def review_onboarding_plan(
                 detail=f"Provisioning aborted and rolled back: {err_msg}"
             )
 
-        # 3. Finalize lead time only on successful completion
-        if payload.action == "approve":
-            req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
-            if req_data and req_data.get("created_at"):
-                created_dt = datetime.fromisoformat(req_data["created_at"].replace("Z", "+00:00"))
-                lead_time_sec = round((datetime.now(timezone.utc) - created_dt).total_seconds(), 2)
-            else:
-                lead_time_sec = 0.0
+        # Calculate lead time only on successful approval
+        req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
+        lead_time_sec = 0.0
+        if req_data and req_data.get("created_at"):
+            created_dt = datetime.fromisoformat(req_data["created_at"].replace("Z", "+00:00"))
+            lead_time_sec = round((datetime.now(timezone.utc) - created_dt).total_seconds(), 2)
 
-            supabase.table("onboarding_requests").update({
-                "total_lead_time_seconds": lead_time_sec,
-                "finalized_at": now_iso,
-            }).eq("request_id", request_id).execute()
-
-        elif payload.action == "regenerate":
-            elapsed_sec = round(time.perf_counter() - t0, 2)
-            prompt_tokens = final_state.get("tokens_prompt", 0)
-            comp_tokens = final_state.get("tokens_completion", 0)
-
-            new_run = (
-                supabase.table("workflow_runs")
-                .select("run_id")
-                .eq("request_id", request_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if new_run.data:
-                new_run_id = new_run.data[0]["run_id"]
-                supabase.table("workflow_runs").update({
-                    "execution_time_seconds": elapsed_sec,
-                    "tokens_prompt": prompt_tokens,
-                    "tokens_completion": comp_tokens,
-                    "tokens_total": prompt_tokens + comp_tokens,
-                    "attempt_number": final_state.get("attempt_count", 2),
-                }).eq("run_id", new_run_id).execute()
+        supabase.table("onboarding_requests").update({
+            "total_lead_time_seconds": lead_time_sec,
+            "finalized_at": now_iso,
+        }).eq("request_id", request_id).execute()
 
         return {
             "status": "success",
