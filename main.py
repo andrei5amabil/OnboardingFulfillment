@@ -644,13 +644,26 @@ def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire
         }
 
     emp = emp_res.data[0]
-    # Fetch active software licenses
     licenses_res = (
         supabase.table("license_assignments")
-        .select("assignment_id, status, assigned_at, software_products(name, vendor, license_type)")
+        .select("assignment_id, status, assigned_at, software_products(product_id, name, vendor, license_type, description, access_url, docs_url)")
         .eq("employee_id", user.employee_id)
+        .eq("status", "active")
         .execute()
     )
+
+    hardware_specs = {}
+    if emp.get("onboarding_request_id"):
+        run_res = (
+            supabase.table("workflow_runs")
+            .select("suggested_hardware")
+            .eq("request_id", emp["onboarding_request_id"])
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if run_res.data:
+            hardware_specs = run_res.data[0].get("suggested_hardware") or {}
 
     return {
         "status": emp.get("status"),
@@ -661,6 +674,8 @@ def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire
         "start_date": emp.get("start_date"),
         "work_location": emp.get("work_location"),
         "work_email": emp.get("work_email"),
+        "shipping_address": emp.get("shipping_address"),
         "medical_clearance": emp.get("medical_clearance_status"),
+        "hardware": hardware_specs,
         "licenses": licenses_res.data or [],
     }

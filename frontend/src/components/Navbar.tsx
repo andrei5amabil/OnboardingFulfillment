@@ -1,123 +1,137 @@
-import React from 'react';
-import { UserCheck, ShieldAlert, Cpu, TrendingUp, Laptop, LogOut } from 'lucide-react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import {
+  FileText,
+  CheckSquare,
+  BarChart3,
+  UserCheck,
+  LogOut,
+  ShieldAlert,
+  Copy,
+  Check,
+} from 'lucide-react';
 
 export type NavTab = 'hr' | 'it' | 'kpi' | 'portal';
 
 interface NavbarProps {
   currentTab: NavTab;
   onTabChange: (tab: NavTab) => void;
-  pendingCount?: number;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
-  currentTab,
-  onTabChange,
-  pendingCount = 0,
-}) => {
-  const { user, role, employeeId, signOut } = useAuth();
+export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
+  const { user, role, signOut } = useAuth();
+  const [copiedEmail, setCopiedEmail] = useState(false);
 
-  const showHR = role === 'admin' || role === 'hr_manager';
-  const showIT = role === 'admin' || role === 'it_manager';
-  const showKPI = role === 'admin' || role === 'hr_manager' || role === 'it_manager';
-  const showPortal = role === 'admin' || role === 'new_hire';
+  const handleCopyEmail = () => {
+    if (user?.email) {
+      navigator.clipboard.writeText(user.email);
+      setCopiedEmail(true);
+      setTimeout(() => setCopiedEmail(false), 2000);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+  };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        {/* Brand / Logo */}
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
-            <Cpu className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="font-bold text-sm text-slate-100">
-              Onboarding Fulfillment
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 font-bold text-slate-100 tracking-tight">
+            <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
+              <ShieldAlert className="w-4 h-4" />
             </div>
-            <p className="text-[11px] text-slate-400">HITL Access & Hardware Provisioning</p>
+            <span>AutoOnboard</span>
           </div>
+
+          <nav className="flex items-center gap-1">
+            {/* HR Intake Tab */}
+            {(role === 'admin' || role === 'hr_manager') && (
+              <button
+                onClick={() => onTabChange('hr')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  currentTab === 'hr'
+                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>HR Intake</span>
+              </button>
+            )}
+
+            {/* IT Approvals Tab */}
+            {(role === 'admin' || role === 'it_manager') && (
+              <button
+                onClick={() => onTabChange('it')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  currentTab === 'it'
+                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>IT Approvals</span>
+              </button>
+            )}
+
+            {/* KPI Telemetry Tab */}
+            {(role === 'admin' || role === 'hr_manager' || role === 'it_manager') && (
+              <button
+                onClick={() => onTabChange('kpi')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  currentTab === 'kpi'
+                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Telemetry</span>
+              </button>
+            )}
+
+            {/* New Hire Hub Tab */}
+            {(role === 'admin' || role === 'new_hire') && (
+              <button
+                onClick={() => onTabChange('portal')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  currentTab === 'portal'
+                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>New Hire Hub</span>
+              </button>
+            )}
+          </nav>
         </div>
 
-        {/* Role-Filtered Navigation Tabs */}
-        <nav className="flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
-          {showHR && (
-            <button
-              type="button"
-              onClick={() => onTabChange('hr')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'hr'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>HR Intake</span>
-            </button>
-          )}
-
-          {showIT && (
-            <button
-              type="button"
-              onClick={() => onTabChange('it')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'it'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <ShieldAlert className="w-4 h-4" />
-              <span>IT Approvals</span>
-              {pendingCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold">
-                  {pendingCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {showKPI && (
-            <button
-              type="button"
-              onClick={() => onTabChange('kpi')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'kpi'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span>KPI Analytics</span>
-            </button>
-          )}
-
-          {showPortal && (
-            <button
-              type="button"
-              onClick={() => onTabChange('portal')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'portal'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <Laptop className="w-4 h-4" />
-              <span>New Hire Hub</span>
-            </button>
-          )}
-        </nav>
-
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex flex-col items-end">
-            <span className="text-xs text-slate-200 font-medium">{user?.email}</span>
-            <span className="text-[10px] font-mono text-indigo-400 uppercase">
-              {role?.replace('_', ' ')} {employeeId ? `• ${employeeId}` : ''}
+          {/* Clickable Corporate Email with Copy Feedback */}
+          <button
+            type="button"
+            onClick={handleCopyEmail}
+            title="Click to copy work email"
+            className="group flex flex-col text-right hover:opacity-95 transition-opacity focus:outline-none"
+          >
+            <span className="text-xs font-medium text-slate-200 group-hover:text-indigo-400 flex items-center justify-end gap-1.5 transition-colors">
+              <span>{user?.email}</span>
             </span>
-          </div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-indigo-400">
+              {copiedEmail ? (
+                <span className="text-emerald-400 font-sans normal-case">Copied to clipboard</span>
+              ) : (
+                role
+              )}
+            </span>
+          </button>
 
           <button
-            onClick={signOut}
+            onClick={handleLogout}
             title="Sign Out"
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 border border-slate-700 transition-colors"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800 transition-colors"
           >
             <LogOut className="w-4 h-4" />
           </button>

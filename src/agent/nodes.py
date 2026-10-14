@@ -23,6 +23,8 @@ load_dotenv(dotenv_path=env_path, override=True)
 logger = logging.getLogger("uvicorn.error")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite4.2:3b")
 
+DEFAULT_NEW_HIRE_PASSWORD = "Welcome2026!"
+
 # --- Pydantic Output Schemas ---
 
 class HardwarePlan(BaseModel):
@@ -451,18 +453,14 @@ def provision_employee_node(state: OnboardingState) -> dict[str, Any]:
     return {"status": "employee_provisioned"}
 
 def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
-    """Executes atomic database provisioning via Supabase RPC."""
     cand = state.get("candidate_data", {})
     req_id = state["request_id"]
     emp_id = state["employee_id"]
-    
     if not cand:
         res = supabase.table("onboarding_requests").select("*").eq("request_id", req_id).single().execute()
         cand = res.data or {}
-
     licenses = state.get("suggested_licenses", [])
     approved_disc_ids = set(state.get("approved_discretionary_ids", []))
-    
     product_ids_to_assign = set()
     for rule in licenses:
         prod = rule.get("software_products") or {}
@@ -493,12 +491,42 @@ def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
     try:
         rpc_res = supabase.rpc("provision_employee_with_licenses", rpc_payload).execute()
         result = rpc_res.data or {}
-        
+        work_email = result.get("work_email")
+
+        if not work_email:
+            raise ValueError("RPC completed but did not return a valid work_email.")
+
+        try:
+            auth_user = supabase.auth.admin.create_user({
+                "email": work_email,
+                "password": DEFAULT_NEW_HIRE_PASSWORD,
+                "email_confirm": True,
+            })
+            auth_user_id = auth_user.user.id
+        except Exception as auth_err:
+            if "already registered" in str(auth_err) or "already exists" in str(auth_err):
+                existing_users = supabase.auth.admin.list_users()
+                auth_user_id = next((u.id for u in existing_users if u.email == work_email), None)
+            else:
+                logger.error("❌ Failed to create auth.users entry for %s: %s", work_email, auth_err)
+                auth_user_id = None
+
+        if auth_user_id:
+            supabase.table("users").upsert({
+                "user_id": auth_user_id,
+                "email": work_email,
+                "employee_id": emp_id,
+                "role": "new_hire",
+                "is_active": True,
+            }, on_conflict="user_id").execute()
+            logger.info("🔑 [New Hire Provisioned] Created portal account: %s (Pass: %s)", work_email, DEFAULT_NEW_HIRE_PASSWORD)
+
         return {
             "status": "provisioned",
-            "work_email": result.get("work_email"),
+            "work_email": work_email,
             "provisioning_error": None,
         }
+
     except Exception as exc:
         err_msg = str(exc)
         logger.error(f"❌ [Provisioning Engine] Atomic transaction rolled back: {err_msg}")
