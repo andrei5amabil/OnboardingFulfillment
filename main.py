@@ -21,6 +21,7 @@ from src.extraction.service import DocumentExtractionService
 from fastapi.middleware.cors import CORSMiddleware
 import time
 from src.auth.dependencies import CurrentUser, RequireRoles, get_current_user
+import re
 
 load_dotenv()
 logger = logging.getLogger("uvicorn.error")
@@ -147,14 +148,41 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         ).eq("request_id", request_id).execute()
 
 def generate_employee_id() -> str:
+    """Generates the next sequential EMP-00000001 ID, safely ignoring non-integer test/admin IDs."""
     try:
-        req = supabase.table("employees").select("employee_id").order("created_at", desc=True).limit(1).execute()
-        if req.data and len(req.data) > 0 and req.data[0].get("employee_id"):
-            last_id = req.data[0]["employee_id"]
-            last_num_emp = int(last_id.split("-")[1])
+        # Fetch the most recent 100 employee records to find the highest numeric sequence
+        req = (
+            supabase.table("employees")
+            .select("employee_id")
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
         
-        new_id_num = last_num_emp + 1
-        return f"EMP-{new_id_num:08d}"
+        max_num = 0
+        if req.data:
+            for row in req.data:
+                emp_id = row.get("employee_id") or ""
+                # Match only IDs strictly following EMP-<digits>
+                match = re.match(r"^EMP-(\d+)$", emp_id)
+                if match:
+                    val = int(match.group(1))
+                    if val > max_num:
+                        max_num = val
+
+        # If no numeric IDs exist yet, start at 1; otherwise increment
+        next_num = max_num + 1 if max_num > 0 else 1
+
+        # Safeguard: ensure the candidate ID is unused in both tables
+        while True:
+            candidate_id = f"EMP-{next_num:08d}"
+            emp_check = supabase.table("employees").select("employee_id").eq("employee_id", candidate_id).execute()
+            req_check = supabase.table("onboarding_requests").select("employee_id").eq("employee_id", candidate_id).execute()
+            
+            if not emp_check.data and not req_check.data:
+                return candidate_id
+            next_num += 1
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating employee ID: {str(e)}")
 
@@ -271,7 +299,7 @@ def create_onboarding_request(
             "location": item.location,
             "work_location": item.work_location,
             "notes": item.notes,
-            "hr_manager_id": item.hr_manager_id, #CHANGE TO user.employee_id / user.user_id
+            "hr_manager_id": user.employee_id or item.hr_manager_id,
             "status": "processing_rules",
         }
         response = supabase.table("onboarding_requests").insert(db_item).execute()
@@ -333,10 +361,12 @@ def review_onboarding_plan(
     payload: ReviewPayload,
     user: CurrentUser = Depends(RequireRoles(["it_manager"]))
 ):
-    """Resumes the workflow, rehydrating from Supabase if thread state was lost in memory."""
+    """Resumes the workflow, executing atomic provisioning or plan regeneration."""
     t0 = time.perf_counter()
     now_iso = datetime.now(timezone.utc).isoformat()
-    reviewer = payload.reviewed_by or "IT_ADMIN"
+    
+    # 1. Resolve reviewer from authenticated JWT context
+    reviewer = user.employee_id or payload.reviewed_by or "IT_ADMIN"
 
     config = {"configurable": {"thread_id": request_id}}
     state_snapshot = onboarding_flow.get_state(config)
@@ -349,6 +379,7 @@ def review_onboarding_plan(
     }
 
     try:
+        # Record review decision on the latest workflow run
         latest_run = (
             supabase.table("workflow_runs")
             .select("run_id")
@@ -365,6 +396,7 @@ def review_onboarding_plan(
                 "reviewed_at": now_iso,
             }).eq("run_id", current_run_id).execute()
 
+        # Rehydrate state if memory checkpointer lost thread tasks
         if not state_snapshot.tasks:
             req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
             if not req_res.data:
@@ -409,12 +441,24 @@ def review_onboarding_plan(
                 "tokens_prompt": run_data.get("tokens_prompt", 0),
                 "tokens_completion": run_data.get("tokens_completion", 0),
                 "tokens_total": run_data.get("tokens_total", 0),
+                "work_email": None,
+                "provisioning_error": None,
             }
             onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
             final_state = onboarding_flow.invoke(None, config=config)
         else:
             final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
 
+        # 2. Check for Transactional Rollback
+        if final_state.get("status") == "provisioning_failed":
+            err_msg = final_state.get("provisioning_error") or "Transaction rolled back during atomic provisioning."
+            logger.error("❌ Atomic provisioning failed for %s: %s", request_id, err_msg)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Provisioning aborted and rolled back: {err_msg}"
+            )
+
+        # 3. Finalize lead time only on successful completion
         if payload.action == "approve":
             req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
             if req_data and req_data.get("created_at"):
@@ -455,7 +499,11 @@ def review_onboarding_plan(
             "status": "success",
             "action": payload.action,
             "workflow_status": final_state.get("status"),
+            "work_email": final_state.get("work_email"),
         }
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Review processing failed for %s: %s", request_id, e)
         raise HTTPException(status_code=500, detail=str(e))

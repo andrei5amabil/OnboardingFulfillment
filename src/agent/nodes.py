@@ -445,59 +445,72 @@ def provision_employee_node(state: OnboardingState) -> dict[str, Any]:
         "updated_at": datetime.now().isoformat(),
     }
 
-    supabase.table("employees").insert(employee_record).execute()
+    #supabase.table("employees").insert(employee_record).execute()
     return {"status": "employee_provisioned"}
 
+def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
+    """Executes atomic database provisioning via Supabase RPC."""
+    cand = state.get("candidate_data", {})
+    req_id = state["request_id"]
+    emp_id = state["employee_id"]
+    
+    if not cand:
+        res = supabase.table("onboarding_requests").select("*").eq("request_id", req_id).single().execute()
+        cand = res.data or {}
 
-def assign_licenses_node(state: OnboardingState) -> dict[str, Any]:
-    emp_id = state.get("employee_id")
-    req_id = state.get("request_id")
     licenses = state.get("suggested_licenses", [])
     approved_disc_ids = set(state.get("approved_discretionary_ids", []))
     
-    # Refetch fallback if licenses missing
-    if not licenses and req_id:
-        run_res = (
-            supabase.table("workflow_runs")
-            .select("suggested_licenses, discretionary_licenses")
-            .eq("request_id", req_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if run_res.data:
-            licenses = run_res.data[0].get("suggested_licenses", [])
-
     product_ids_to_assign = set()
-
     for rule in licenses:
         prod = rule.get("software_products") or {}
-        prod_id = prod.get("product_id")
-        if prod_id:
-            product_ids_to_assign.add(prod_id)
+        pid = prod.get("product_id")
+        if pid:
+            product_ids_to_assign.add(pid)
+    product_ids_to_assign.update(approved_disc_ids)
 
-    for d_id in approved_disc_ids:
-        product_ids_to_assign.add(d_id)
+    rpc_payload = {
+        "p_request_id": req_id,
+        "p_employee_id": emp_id,
+        "p_first_name": cand.get("first_name", ""),
+        "p_last_name": cand.get("last_name", ""),
+        "p_department": cand.get("department", ""),
+        "p_role": cand.get("role", ""),
+        "p_start_date": cand.get("start_date"),
+        "p_employment_type": cand.get("employment_type", "full-time"),
+        "p_location": cand.get("location", ""),
+        "p_work_location": cand.get("work_location", "on-site"),
+        "p_manager_id": cand.get("manager_id"),
+        "p_national_id": cand.get("national_id"),
+        "p_shipping_address": cand.get("shipping_address"),
+        "p_contact_phone": cand.get("contact_phone"),
+        "p_medical_clearance_status": cand.get("medical_clearance_status", False),
+        "p_product_ids": list(product_ids_to_assign),
+    }
 
-    records = [
-        {
-            "assignment_id": f"LIC-{uuid.uuid4().hex[:8].upper()}",
-            "employee_id": emp_id,
-            "product_id": pid,
-            "status": "active",
-            "assigned_at": datetime.now().isoformat(),
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
+    try:
+        rpc_res = supabase.rpc("provision_employee_with_licenses", rpc_payload).execute()
+        result = rpc_res.data or {}
+        
+        return {
+            "status": "provisioned",
+            "work_email": result.get("work_email"),
+            "provisioning_error": None,
         }
-        for pid in product_ids_to_assign
-    ]
-
-    if records:
-        supabase.table("license_assignments").insert(records).execute()
-
-    return {"status": "licenses_assigned"}
+    except Exception as exc:
+        err_msg = str(exc)
+        logger.error(f"❌ [Provisioning Engine] Atomic transaction rolled back: {err_msg}")
+        return {
+            "status": "provisioning_failed",
+            "provisioning_error": err_msg,
+        }
 
 def finalize_workflow_node(state: OnboardingState) -> dict[str, Any]:
+    if state.get("status") == "provisioning_failed":
+        supabase.table("onboarding_requests").update(
+                {"status": "provisioning_failed"}
+            ).eq("request_id", request_id).execute()
+        return {"status": "failed"}
     request_id = state.get("request_id")
     reviewer = state.get("reviewed_by") or "IT_ADMIN"
 

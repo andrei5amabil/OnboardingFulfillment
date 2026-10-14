@@ -25,3 +25,5 @@ class OnboardingState(TypedDict):
     tokens_prompt: int
     tokens_completion: int
     tokens_total: int
+    work_email: Optional[str]
+    provisioning_error: Optional[str]
