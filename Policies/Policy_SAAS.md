@@ -1,17 +1,29 @@
 # POL-SAAS: SaaS Licensing & Software Entitlement Standard
 
 ## 1. Purpose & Scope
-This policy regulates the automated assignment, verification, and reclamation of software subscriptions, licenses, and seat entitlements.
+This policy regulates the end-to-end lifecycle of corporate software subscriptions, cloud applications, and digital tool entitlements. It enforces deterministic allocation based on verified job roles, establishes automated pre-allocation inventory verification, provides Human-in-the-Loop governance over high-tier licenses, prevents license bloat through automated inactivity harvesting, and mandates atomic reclamation during offboarding to ensure financial efficiency and regulatory compliance.
 
-## 2. Entitlement Evaluation
-- **[POL-SAAS-201] Relational Baseline:** User licenses must strictly adhere to the mapped entitlements in `product_assignment_rules`. The AI orchestrator is strictly prohibited from granting unmapped licenses without human approval.
-- **[POL-SAAS-202] Pre-Allocation Stock Check:** The deterministic execution engine must verify `total_seats` availability in the software catalog prior to invoking assignment tools.
-- **[POL-SAAS-203] Seat Exhaustion Guardrail:** If an assigned product has zero available seats remaining, the orchestrator must flag a deficit error, suspend license execution, and alert the IT administrator.
+## 2. Entitlement Evaluation & Stock Verification
+- **[POL-SAAS-201] Relational Baseline Mapping:** User software licenses and application seats must be resolved strictly through the database role entitlement rules and product assignment tables. The AI orchestration engine is strictly prohibited from inferring, predicting, or auto-assigning licenses outside verified database records.
+- **[POL-SAAS-202] Pre-Allocation Stock Verification:** Prior to invoking deterministic license assignment tools (`assign_license`), the orchestration engine must cross-reference available seat capacity in the software catalog by verifying that total provisioned seats do not equal or exceed total purchased seats.
+- **[POL-SAAS-203] Seat Exhaustion Guardrail & Deficit Circuit Breaker:** If an entitlement mapped to a new hire's role has zero remaining available seats, the orchestration engine must immediately flag a license deficit exception, halt automated assignment for that specific tool, and record an alert for the IT administrator.
+- **[POL-SAAS-204] Least-Privilege Access Scoping:** Software entitlements must be granted at the lowest functional tier and access scope (such as standard user, viewer, or contributor) required by the role entitlement matrix. Administrative or elevated tenant roles must never be provisioned as part of a default onboarding bundle.
+- **[POL-SAAS-205] Atomic Concurrency & Seat Locking:** License allocation operations must be executed through atomic transactional database functions to prevent race conditions and duplicate seat over-allocation during concurrent onboarding workflows.
 
-## 3. Approval Gates & Exceptions
-- **[POL-SAAS-301] Gated Products:** Software flagged with `requires_approval: true` must be routed directly to the Human-in-the-Loop (HITL) gateway. The deterministic runner must not execute assignment until approval is submitted.
-- **[POL-SAAS-302] Out-of-Band Entitlements:** Any software requested outside the standard role-based matrix triggers an access exception that requires documented business justification and IT administrator sign-off.
+## 3. Approval Gates & Exception Management
+- **[POL-SAAS-301] Gated Products & High-Cost Subscriptions:** Software products flagged in the catalog with approval requirements (`requires_approval: true`), such as high-cost data visualization platforms, enterprise development suite licenses, or external contractor packages, must be routed directly to the Human-in-the-Loop (HITL) gateway.
+- **[POL-SAAS-302] Out-of-Band Entitlement Governance:** Any software application requested outside the standard role-based matrix triggers an operational access exception. The orchestration engine must isolate the request into an exception block requiring documented business justification and explicit administrative sign-off.
+- **[POL-SAAS-303] Human-in-the-Loop Gateway Lock:** The deterministic execution runner remains locked for any gated or exception software item until an IT Administrator or Department Manager records an explicit approval decision in the review console.
+- **[POL-SAAS-304] Segregation of Incompatible SaaS Roles:** In accordance with enterprise separation of duties standards, mutually incompatible software access entitlements—such as concurrent administrative deployment rights and audit review roles—cannot be assigned to the same user identity.
+- **[POL-SAAS-305] Time-Bound Access Exceptions:** Software licenses granted via exception workflows must be assigned an automated Time-to-Live (TTL) expiration date not exceeding 90 calendar days, after which formal re-approval is mandatory.
 
-## 4. License Revocation
-- **[POL-SAAS-401] Rapid Reclamation:** Upon employee offboarding, the system must execute license revocation tools to release all provisioned seats back to the shared pool.
-- **[POL-SAAS-402] Orphaned Seat Audit:** The workflow must verify that the employee holds zero active software assignments before generating the final compliance report.
+## 4. Usage Governance & License Reclamation
+- **[POL-SAAS-401] Rapid Offboarding Reclamation:** Upon the initiation of an offboarding order or arrival of the scheduled termination timestamp, the execution engine must invoke deterministic license revocation routines (`revoke_license`) to immediately release all provisioned software seats back to the unallocated organizational pool.
+- **[POL-SAAS-402] Orphaned Seat & Residual Entitlement Audit:** The offboarding runner must query the license assignment registry and cross-reference external application directories to verify that the departing employee holds zero active software seats before generating the final compliance report.
+- **[POL-SAAS-403] Automated Inactivity Harvesting:** Dedicated enterprise software seats that demonstrate zero authentication activity over 60 consecutive calendar days must be automatically flagged for administrative reclamation, freeing capital and unallocated seats for active staff.
+- **[POL-SAAS-404] Role Transition & Transfer De-allocation:** When an employee transitions between departments or role baselines, all specialized software entitlements tied to the former role must be automatically queued for deprovisioning within 5 business days unless an explicit role-continuation exception is authorized.
+
+## 5. Inventory Auditing & Compliance Persistence
+- **[POL-SAAS-501] Real-Time Capacity & Threshold Monitoring:** The software asset tracking system must monitor pool consumption across all SaaS products. When active license consumption reaches or exceeds 85% of total purchased capacity, automated warnings must be dispatched to IT procurement.
+- **[POL-SAAS-502] Transactional Audit Logging:** Every license query, atomic assignment, approval override, and revocation event executed by the platform must be immutably committed to the database `audit_logs` table with associated employee IDs, product IDs, reviewer credentials, and precise timestamps.
+- **[POL-SAAS-503] Continuous Directory-to-Catalog Reconciliation:** The system must run scheduled reconciliation routines comparing active cloud directory single sign-on assignments against the internal relational database to identify and isolate unmanaged shadow licenses or orphaned seats.

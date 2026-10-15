@@ -1,21 +1,31 @@
 # POL-NET: Corporate Network & Virtual Private Network (VPN) Standard
 
 ## 1. Purpose & Scope
-This policy governs automated provisioning, network isolation, and session revocation across corporate networks and departmental enclaves[cite: 9].
+This policy defines the mandatory architecture, authentication controls, and automated operational lifecycle governing corporate network connectivity, remote access tunnels, and departmental enclave isolation. It enforces a strict zero-trust network architecture across all environments, guaranteeing that network connectivity is role-bounded, least-privileged, verified by continuous device posture assessment, and deterministically provisioned without introducing operational bottlenecks.
 
-## 2. Network Segmentation & Enclave Access
-- **[POL-NET-201] Default Tier-1 SaaS:** Standard cloud tools require no dedicated VPN connection[cite: 9].
-- **[POL-NET-202] Restricted Enclave Entitlement:** VPN profiles granting access to isolated departmental enclaves or database infrastructure are provisioned strictly via database entitlement rules[cite: 9].
-- **[POL-NET-203] Zero Day-1 Blockers:** Any mandatory VPN entitlement defined in the database must be provisioned prior to the start date to prevent operational blocking[cite: 9].
+## 2. Network Segmentation & Enclave Entitlements
+- **[POL-NET-201] Cloud Service Direct Routing:** Baseline enterprise cloud collaboration, productivity, and software-as-a-service platforms must be accessed via authenticated transport layer security endpoints without traversing internal network tunnels, reserving private gateway bandwidth for sensitive workloads.
+- **[POL-NET-202] Departmental Enclave Isolation:** Access to restricted infrastructure segments—including financial transaction ledgers, production engineering environments, core database subnets, and human resources data vaults—requires role-specific encrypted tunnel profiles deterministically derived from the database role entitlement matrix.
+- **[POL-NET-203] Deterministic Tunnel Profile Minting:** Network tunnel profiles, subnet access control lists, and routing rules must be minted strictly through automated lookup of verified role entitlement rules. The orchestration agent is strictly prohibited from inferring, estimating, or assigning arbitrary gateway routes outside verified database schemas.
+- **[POL-NET-204] Zero Day-1 Operational Blockers:** Any mandatory network tunnel entitlement mapped to an onboarding employee's verified role must be provisioned in an active-ready state at least 24 hours prior to their official start date, preventing day-one connectivity delays.
+- **[POL-NET-205] Micro-Segmentation and Lateral Movement Restriction:** All private network enclaves must implement micro-segmentation controls. Ingress rules must strictly forbid peer-to-peer workstation routing, restrict lateral subnet traversal, and enforce default-deny postures across all non-whitelisted internal ports.
 
-## 3. Work Location & Tunnel Configuration
-- **[POL-NET-301] Split-Tunneling for Remote Work:** Requests with `work_location: remote` require a split-tunnel VPN profile to optimize cloud SaaS routing[cite: 9].
-- **[POL-NET-302] Device Trust & Authentication:** VPN connections require verified MFA and are restricted to company-managed hardware recorded in the asset database[cite: 9]. VPN access cannot be established via a TAP token[cite: 9].
+## 3. Device Trust, Authentication & Tunnel Architecture
+- **[POL-NET-301] Managed Device Hardware Attestation:** Remote network tunnel connections are restricted exclusively to corporate-managed physical assets registered in the IT asset database and verified through the centralized endpoint management system. Personal or unmanaged devices are strictly blocked at the gateway.
+- **[POL-NET-302] Cryptographic Certificate Authentication:** Network gateway authentication requires mutual validation utilizing unique, hardware-bound client certificates issued by the enterprise Public Key Infrastructure (PKI) and sealed within the device Trusted Platform Module (TPM).
+- **[POL-NET-303] Prohibition of Temporary Token Tunneling:** Network tunnel access cannot be negotiated using single-use Temporary Access Pass (TAP) credentials. Full multi-factor authentication enrollment and verified cryptographic client certificate issuance are mandatory prerequisites for tunnel establishment.
+- **[POL-NET-304] Split-Tunneling Architecture for Remote Personnel:** Requests designated with remote work location must automatically receive an optimized split-tunnel configuration, routing strictly internal corporate CIDR subnets through the encrypted tunnel while offloading standard public internet and validated cloud SaaS traffic.
+- **[POL-NET-305] High-Risk Full Tunnel Redirection:** When an endpoint connects from designated untrusted networks, public access access points, or international travel locations, the network gateway must dynamically enforce full-tunnel redirection through centralized threat inspection firewalls.
 
-## 4. Cross-Enclave Exception Routing
-- **[POL-NET-401] Cross-Departmental Routing Check:** Requests for network bridges outside standard departmental enclaves trigger an automated exception flag[cite: 9].
-- **[POL-NET-402] HITL Network Approval:** Bridged enclave access must be reviewed and authorized by an IT Admin via the HITL gateway before profile generation[cite: 9].
+## 4. Cross-Enclave Routing & Exception Governance
+- **[POL-NET-401] Cross-Departmental Routing Anomaly Detection:** Any provisioning request containing routes to network enclaves outside the employee’s primary organizational department (such as non-engineering personnel requesting access to staging or production server clusters) triggers an automated security exception.
+- **[POL-NET-402] Automated Network Quarantining:** The automated orchestration agent must never auto-generate cross-enclave routing rules or bridge isolated subnets. All flagged network deviations must be isolated into a quarantined exception block within the execution plan.
+- **[POL-NET-403] Human-in-the-Loop Gateway Authorization:** Bridged enclave access and non-standard subnet allocations must be reviewed and explicitly authorized by a Network Security Administrator through the Human-in-the-Loop (HITL) dashboard before profile issuance.
+- **[POL-NET-404] Time-Bound Enclave Access Limits:** Approved cross-departmental network entitlements must be configured with an explicit Time-to-Live (TTL) not to exceed 60 calendar days, after which automated deprovisioning occurs unless a formal renewal is certified.
 
-## 5. Offboarding & Session Revocation
-- **[POL-NET-501] Cryptographic Invalidation:** Offboarding triggers immediate invalidation of all active VPN sessions, certificates, and cryptographic tokens[cite: 9].
-- **[POL-NET-502] Zero Residual Network Access:** Automated verification must confirm zero persistent network routes before offboarding can be finalized[cite: 9].
+## 5. Session Governance & Continuous Posture Verification
+- **[POL-NET-501] Session Idle and Absolute Lifespan Constraints:** All remote network tunnel sessions must enforce an automated idle disconnect threshold of 30 consecutive minutes of inactivity and an absolute session re-authentication lifespan not to exceed 12 continuous hours.
+- **[POL-NET-502] Continuous Posture Assessment:** The network access gateway must continuously evaluate endpoint compliance telemetry. If an active device disables its host firewall, uninstalls required security agents, or falls out of patch compliance, its active session must be immediately terminated and isolated into a remediation subnet.
+- **[POL-NET-503] Instantaneous Offboarding Revocation:** The execution of an offboarding trigger must immediately send an atomic revocation signal to all network access gateways, instantly terminating active tunnel sessions, invalidating assigned client certificates, and disabling gateway user credentials.
+- **[POL-NET-504] Zero Residual Network Route Verification:** Offboarding compliance cannot be certified until an automated reconciliation scan verifies that all gateway user accounts, static routing assignments, and firewall group memberships bound to the employee identifier have been completely expunged.
+- **[POL-NET-505] Network Audit Telemetry & Immutable Logging:** All network connection events, including source IP address, assigned tunnel subnet, authentication method, session duration, and data transfer metrics, must be written to the centralized security audit logging repository.

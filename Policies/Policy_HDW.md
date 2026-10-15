@@ -1,17 +1,36 @@
 # POL-HDW: Enterprise IT Asset & Hardware Provisioning Standard
 
 ## 1. Purpose & Core Principles
-This policy defines the governance and fulfillment lifecycle for physical IT equipment across onboarding and offboarding workflows.
+This policy establishes mandatory operational standards and deterministic fulfillment protocols governing the lifecycle of physical computing assets and peripheral equipment. It guarantees that every employee receives standard, secure, and role-appropriate equipment prior to their start date, enforces chain-of-custody tracking, and ensures rigorous data sanitization upon offboarding in compliance with enterprise zero-trust architecture.
 
-## 2. Hardware Allocation Protocol
-- **[POL-HDW-201] Deterministic Resolution:** All physical equipment allocations must be determined strictly by the database entitlement matrix. The orchestration engine must never infer or assign hardware models outside verified database records.
-- **[POL-HDW-202] Inventory & Seat Verification:** Before provisioning an asset, the system must cross-reference available quantities in the IT Asset Records.
-- **[POL-HDW-203] Stock Depletion Fallback:** If a required hardware asset has zero available stock, the automated workflow must immediately halt the hardware task, dispatch a critical notification to the SysAdmin, and mark the workflow execution as failed.
+## 2. Deterministic Allocation & Hardware Tiers
+- **[POL-HDW-201] Deterministic Hardware Resolution:** Physical equipment allocations must be resolved strictly through automated cross-referencing of the validated employment payload against the database role entitlement matrix. The orchestration engine is strictly prohibited from inferring, guessing, or assigning hardware models based on arbitrary request text.
+- **[POL-HDW-202] Standard Productivity Tier:** General business, operational, administrative, and customer-facing roles are strictly provisioned with the Standard Enterprise Laptop profile (baseline multi-core business processor, 16 GB unified system memory, and 512 GB encrypted solid-state storage).
+- **[POL-HDW-203] Technical & Engineering Workstation Tier:** Software engineering, systems architecture, data engineering, and data analytics roles are entitled to the High-Performance Workstation Laptop profile (high-throughput multi-core workstation processor, minimum 32 GB unified system memory, and 1 TB encrypted solid-state storage).
+- **[POL-HDW-204] Specialized Peripheral Bundles:** Standard peripheral packages (external dual-display monitors, unified docking station, wireless peripheral input devices, and integrated web camera) are automatically provisioned based on departmental role profiles recorded in the database.
+- **[POL-HDW-205] Hardware Discrepancy Isolation:** Any request for non-standard hardware profiles, customized internal components, or supplementary physical compute units not mapped to the role in the database asset records must be decoupled from automated provisioning and routed to the exception handling queue.
 
-## 3. Work Location Logistics
-- **[POL-HDW-301] Remote Delivery:** Requests with `work_location: remote` require automatic generation of an equipment dispatch ticket and courier delivery to the verified home address.
-- **[POL-HDW-302] On-Site Dispatch:** Requests with `work_location: on-site` or `work_location: hybrid` must route hardware setup tasks to the local campus IT Helpdesk prior to the employee's start date.
+## 3. Inventory Verification & Stock Depletion Protocols
+- **[POL-HDW-301] Pre-Provisioning Inventory Cross-Reference:** Prior to generating an asset dispatch order, the orchestration engine must query real-time stock levels in the IT Asset Records table to confirm that a validated, unreserved physical unit exists within the designated regional depot.
+- **[POL-HDW-302] Atomic Asset Reservation:** Successful verification must immediately execute an atomic inventory decrement, transitioning the selected asset status from unassigned inventory to reserved status to eliminate duplicate allocation race conditions.
+- **[POL-HDW-303] Stock Depletion Escalation:** If a required hardware tier has zero available stock in the target regional depot, the automated provisioning pipeline must immediately halt the hardware fulfillment task, log a high-priority dependency block, and dispatch a stock depletion alert to the IT Systems Administrator.
+- **[POL-HDW-304] Prohibition of Automated Down-Tiering:** The orchestration engine must never substitute an inferior hardware profile when workstation stock is depleted. Any asset substitution requires an explicit manual override logged by an IT Administrator in the review console.
 
-## 4. Offboarding Reclamation
-- **[POL-HDW-401] Hardware Recovery:** Initiating an offboarding workflow automatically generates return instructions and pre-paid shipping waybills for all assigned serial numbers.
-- **[POL-HDW-402] Inventory Reconciliation:** Offboarding compliance cannot be signed off until returned assets are marked as sanitized and returned to inventory in the database.
+## 4. Security Configuration & Device Enrollment
+- **[POL-HDW-401] Mandatory Full Disk Encryption:** Every physical computing device must have hardware-enforced Full Disk Encryption (FDE) enabled and verified before dispatch. Cryptographic recovery keys must be automatically escrowed in the centralized identity and device registry.
+- **[POL-HDW-402] Centralized Device Management Enrollment:** All provisioned endpoints must be enrolled into the enterprise Unified Endpoint Management (UEM) system prior to physical delivery, ensuring enforcement of remote wipe capabilities, device health attestations, and compliance configurations.
+- **[POL-HDW-403] Secure Hardware Root of Trust:** Laptops and workstations must enforce hardware-based Trusted Platform Module (TPM) verification, secure boot firmware protections, and restricted BIOS/UEFI administrative passwords to protect against pre-boot tampering.
+- **[POL-HDW-404] Base System Image Compliance:** Devices must be flashed strictly with the approved corporate enterprise operating system image, containing baseline security agents, anti-malware protections, and network access control certificates.
+
+## 5. Work Location Logistics & Delivery Protocols
+- **[POL-HDW-501] Remote Delivery Dispatch:** Onboarding records designated with remote work location trigger the automated creation of a courier dispatch order and trackable consignment, routed strictly to the verified residential address supplied in the human resources payload.
+- **[POL-HDW-502] Dispatch Lead-Time Constraints:** Courier dispatches for remote personnel must execute at least 5 business days prior to the employee start date to guarantee day-one operational readiness.
+- **[POL-HDW-503] On-Site and Hybrid Staging:** Onboarding records designated with on-site or hybrid work location must route staging tasks to the corresponding campus IT Helpdesk repository for physical desk delivery and direct issuance on day one.
+- **[POL-HDW-504] Chain of Custody Acknowledgment:** Upon receipt of physical equipment, the employee must complete an automated digital asset acceptance within the onboarding web portal, recording serial numbers and cryptographically binding the asset to their employee record.
+
+## 6. Asset Recovery, Sanitization & Decommissioning
+- **[POL-HDW-601] Automated Offboarding Recovery Initiation:** Initiation of an offboarding event automatically retrieves all active serial numbers bound to the employee identifier, locks device access via the endpoint management system, and generates prepaid courier return waybills.
+- **[POL-HDW-602] Return Transit Window:** Terminated personnel must surrender and dispatch all corporate hardware assets within 5 business days following their effective termination date.
+- **[POL-HDW-603] Cryptographic Sanitization Standard:** Upon receipt of returned equipment at the central depot, IT technicians must perform an automated cryptographic data purge adhering to enterprise data sanitization standards before any asset can be returned to active inventory.
+- **[POL-HDW-604] Inventory Reconciliation Sign-Off:** Offboarding fulfillment compliance cannot achieve final sign-off until all recovered asset serial numbers are registered as inspected, sanitized, and restocked within the central asset database.
+- **[POL-HDW-605] Unreturned Asset Escalation Protocol:** If return courier tracking is not initiated within 10 business days of employee termination, the asset management system must trigger a security alert and mark the hardware record as unrecovered for legal and compliance review.

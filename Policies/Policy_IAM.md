@@ -1,20 +1,33 @@
 # POL-IAM: Enterprise Identity & Access Management Standard
 
 ## 1. Purpose & Scope
-This standard establishes mandatory lifecycle rules for creating, maintaining, and revoking digital identities across all corporate infrastructure[cite: 8].
+This standard establishes mandatory identity governance, authentication protocols, and lifecycle controls across all enterprise systems, directories, and data environments. It enforces a strict zero-trust operational architecture where digital identities are centrally administered, continuously validated, constrained by least-privilege principles, and deterministically managed from initial hire through complete offboarding.
 
-## 2. Identity Creation & Authentication
-- **[POL-IAM-201] Enterprise Identifier Minting:** Every verified onboarding request must generate a unique Corporate Email and Enterprise ID (ENT-ID)[cite: 8]. Shared accounts are strictly prohibited[cite: 8].
-- **[POL-IAM-202] Temporary Access Pass (TAP):** To eliminate plain-text password transmission, the system must generate a single-use, time-bound TAP activation token expiring 24 hours after the official start date[cite: 8].
-- **[POL-IAM-203] Mandatory MFA Enrollment:** Initial authentication via TAP must enforce immediate Multi-Factor Authentication (MFA) registration before granting access to internal resources[cite: 8].
+## 2. Identity Minting & Authentication Governance
+- **[POL-IAM-201] Enterprise Identifier Minting:** Every verified onboarding payload must deterministically generate a unique Enterprise ID (ENT-ID) and standardized Corporate Email Address based on authoritative HR record values. Shared, group, or generic user accounts are strictly prohibited for individual personnel.
+- **[POL-IAM-202] Temporary Access Pass Provisioning:** To completely eliminate the security risks of plain-text password generation and transmission, the identity engine must issue a single-use, high-entropy Temporary Access Pass (TAP) activation link. The TAP must be configured with an automated expiration window not to exceed 24 hours from the official employee start date.
+- **[POL-IAM-203] Secure Credential Dispatch:** Temporary activation credentials must be transmitted strictly to the employee's pre-verified personal contact channel registered during HR intake. Transmitting credentials, temporary tokens, or activation URLs via unencrypted public channels or internal shared boards is strictly prohibited.
+- **[POL-IAM-204] Mandatory Multi-Factor Authentication Enrollment:** Upon initial authentication using the Temporary Access Pass, the identity provider must force the user into an isolated onboarding workflow requiring immediate enrollment of enterprise-approved Multi-Factor Authentication (MFA) methods (such as hardware cryptographic keys or mobile push-authenticator applications) prior to releasing access to internal resources.
+- **[POL-IAM-205] Prohibition of Legacy Authentication:** Interactive user accounts must have legacy authentication protocols, non-interactive password exposure, and basic authentication endpoints permanently disabled at the directory level to prevent credential replay and spray attacks.
 
 ## 3. Access Governance & Principle of Least Privilege
-- **[POL-IAM-301] Least Privilege Baseline:** User access is restricted to the minimum required baseline strictly resolved through the database entitlement matrix[cite: 8].
-- **[POL-IAM-302] Out-of-Band Access Approval:** Unmapped identity entitlements require explicit approval from the Department Manager and IT Admin before assignment execution[cite: 8].
+- **[POL-IAM-301] Role-Based Entitlement Baselines:** Access privileges and directory group memberships must be granted strictly according to the enterprise role entitlement rules table. Personnel receive only the minimum baseline access required to fulfill their specific departmental function.
+- **[POL-IAM-302] Segregation of Incompatible Duties:** The provisioning engine must evaluate inbound role assignments against corporate Segregation of Duties (SoD) matrices. Conflicting entitlements—such as concurrent financial approval permissions and vendor disbursement privileges—cannot be assigned to a single identity without prior compliance sign-off.
+- **[POL-IAM-303] Out-of-Band Entitlement Governance:** Any entitlement requested outside the established role-based baseline must be treated as an access exception, requiring verified business justification and two-party sign-off from the Department Manager and IT Systems Administrator before provisioning execution.
+- **[POL-IAM-304] Human vs. Service Account Isolation:** Standard employee user accounts must never be utilized for background automated tasks, scheduled cron jobs, or API integrations. All system-to-system interactions require dedicated non-interactive service identities managed through secure vault credentials.
 
-## 4. Identity Revocation & Offboarding
-- **[POL-IAM-401] Immediate Deactivation:** All corporate access, active sessions, and authentication tokens must be simultaneously terminated upon the approved termination date[cite: 8].
-- **[POL-IAM-402] Ownership Handover:** Ownership of repositories, files, and active workflow tasks must be transferred to the designated replacement (`transfer_ownership_to`) before identity deactivation[cite: 8].
+## 4. Identity Lifecycle State Transitions
+- **[POL-IAM-401] Authoritative Source Synchronization:** The enterprise Human Resources Information System (HRIS) serves as the single authoritative source of truth for identity lifecycle states. The Central Directory Service must mirror state changes (Hire, Active, Suspended, Terminated) through automated real-time orchestration.
+- **[POL-IAM-402] Staged Pre-Activation Protocol:** Accounts created prior to an employee's official start date must be provisioned in an inactive Staged state. The deterministic engine must automatically schedule account activation to occur at 00:01 local campus time on the verified start date.
+- **[POL-IAM-403] Automated Inactivity Suspension:** Any active enterprise account that fails to record an authenticated session for 90 consecutive calendar days must be automatically transitioned to Suspended status, with assigned non-core licenses reclaimed and access privileges temporarily frozen.
 
-## 5. State Persistence & Compliance
-- **[POL-IAM-501] Audit State Recording:** Every provisioning and de-provisioning event executed by deterministic tools must be persistently recorded in `audit_logs`[cite: 8].
+## 5. Identity Revocation & Asset Handover
+- **[POL-IAM-501] Atomic Session Termination:** Upon the execution of an offboarding order or termination timestamp, the identity engine must execute a global revocation signal, instantly invalidating all active single sign-on (SSO) tokens, refresh tokens, active VPN tunnels, and open session states across all federated resources.
+- **[POL-IAM-502] Account Disablement & Authentication Locking:** Terminated identities must be immediately moved to a dedicated Disabled organizational unit within the Central Directory Service, with password hashes randomized, interactive login disabled, and public directory visibility suppressed.
+- **[POL-IAM-503] Mandatory Digital Asset Handover:** Before identity deactivation, the offboarding workflow must execute a digital asset transfer task, reassigning primary ownership of all active code repositories, cloud document stores, shared drive contents, and assigned ticket workflows to the designated replacement manager specified in the offboarding payload (`transfer_ownership_to`).
+- **[POL-IAM-504] Identity Quarantine & Archival Window:** Terminated account records and mailbox archives must be retained in an encrypted quarantine state for a minimum of 90 calendar days to accommodate legal hold requirements and business continuity before permanent deletion or sanitization.
+
+## 6. Audit Trails & Compliance Verification
+- **[POL-IAM-601] Deterministic Audit Logging:** Every identity provisioning, modification, escalation, suspension, and deprovisioning event performed by automated agents or administrators must be immutably committed to the `audit_logs` database table with the initiating actor identifier, target entity ID, and high-resolution timestamp.
+- **[POL-IAM-602] Continuous Identity Reconciliation:** The identity engine must perform daily reconciliation scans comparing active directory objects against valid employee employment records, automatically flagging and isolating unlinked or orphaned accounts for administrative review.
+- **[POL-IAM-603] Periodic Access Recertification:** Department managers must perform quarterly access recertifications for all direct reports. Any baseline or out-of-band privilege not explicitly re-certified within 30 days of review notification must be automatically queued for deterministic revocation.

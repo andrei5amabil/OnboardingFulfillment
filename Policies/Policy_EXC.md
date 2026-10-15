@@ -1,19 +1,36 @@
 # POL-EXC: Access Exception & Privilege Escalation Policy
 
 ## 1. Purpose & Scope
-This policy governs protocols for user access requests that deviate from predefined departmental and role baselines, preventing unvetted permissions and uncoordinated delays[cite: 6].
+This policy establishes mandatory governance, risk-scoring criteria, and operational workflows for evaluating, authorizing, and auditing any onboarding or operational entitlement request that deviates from predefined departmental baselines, role-based entitlement matrices, or standard asset allocation catalogues. It enforces zero-trust architecture by ensuring that no access is granted by default and that all out-of-band privileges undergo deterministic validation, risk isolation, and administrative review.
 
 ## 2. Baseline Deviations & Diff Detection
-- **[POL-EXC-201] Relational Mismatch Flagging:** Any entitlement request not explicitly mapped in `product_assignment_rules` or IT asset tables triggers an automated exception[cite: 6].
-- **[POL-EXC-202] Execution Isolation:** The orchestration agent must never auto-execute unmapped entitlements[cite: 6]. Out-of-band requests must be isolated into an exception block within the generated plan[cite: 6].
+- **[POL-EXC-201] Relational Mismatch Flagging:** Any inbound provisioning payload containing an entitlement, software license tier, cloud service role, or hardware tier not explicitly assigned to the employee's role in the verified role entitlement matrix or IT asset allocation table must be flagged automatically as a policy exception.
+- **[POL-EXC-202] Automated Execution Isolation:** The automated orchestration agent is strictly prohibited from executing deterministic provisioning tasks for unmapped or non-standard entitlements. All out-of-band items must be isolated into a quarantined exception block within the generated execution plan.
+- **[POL-EXC-203] Departmental and Location Cross-Check:** Requests requesting access to departmental software suites outside the user’s primary organizational unit, or hardware exceeding the standard specification for the employee's physical deployment region, must be marked with a high-discrepancy exception flag.
+- **[POL-EXC-204] Seat Exhaustion Handling:** If an automated entitlement request maps to a valid role rule but the corresponding enterprise software license pool has zero remaining unallocated seats, the orchestration engine must treat the request as an operational exception, halt license allocation, and flag the dependency for administrative license pool expansion.
+- **[POL-EXC-205] Conflicting Entitlement Detection:** Any request combining roles or permission sets identified as mutually exclusive under the enterprise Segregation of Duties (SoD) framework triggers a critical compliance exception and immediate freeze of the conflicting assignment.
 
-## 3. Privileged Access Management (PAM)
-- **[POL-EXC-301] High-Risk Classification:** Requests for administrative rights, root-level database access, or global SaaS admin consoles are classified as Privilege Escalations[cite: 6].
-- **[POL-EXC-302] Mandatory Business Justification:** Payloads requesting privileged access must include a non-empty business justification string[cite: 6]. Omitting this justification causes immediate automated rejection[cite: 6].
+## 3. Privileged Access Management & High-Risk Tiers
+- **[POL-EXC-301] Elevated Privilege Classification:** Access to centralized directory administration consoles, infrastructure-as-a-service management portals, production database read/write endpoints, enterprise identity provider settings, security logging hubs, and core network configurations is classified as high-risk Privileged Access.
+- **[POL-EXC-302] Mandatory Business Justification:** Any request requesting privileged access, elevated operational roles, or non-standard software suites must include a non-empty, detailed business justification string defining the operational necessity, business project, and supervisor endorsement. Payloads lacking this justification must trigger immediate automated rejection.
+- **[POL-EXC-303] Least Privilege and Time-Bound Constraints:** Standard onboarding workflows must never grant perpetual administrative or privileged access. Privileged entitlements must be configured with an explicit Time-to-Live (TTL), defaulting to a maximum of 30 calendar days before automated expiration.
+- **[POL-EXC-304] Secondary Authorization Requirement:** Privileged access requests involving root-level directory permissions, master tenant administrative roles, or production credential vaults require two-party authorization consisting of the hiring manager's endorsement and an explicit Information Security Administrator approval.
+- **[POL-EXC-305] Emergency Break-Glass Protocols:** Emergency administrative entitlements granted outside the standard provisioning pipeline require explicit invocation of break-glass credentials, resulting in real-time notification to the security operations team and automatic generation of an audit ticket.
 
-## 4. Human-in-the-Loop (HITL) Gateway
-- **[POL-EXC-401] Mandatory IT Review:** All flagged exceptions and privilege escalations must route to the HITL dashboard for diff inspection and policy citation review[cite: 6].
-- **[POL-EXC-402] Explicit Admin Authorization:** Deterministic execution remains locked until an IT Admin explicitly approves or rejects the exception in the dashboard[cite: 6].
+## 4. Human-in-the-Loop Gateway & Governance
+- **[POL-EXC-401] Mandatory Administrative Triage:** All requests flagged with baseline deviations, missing seats, or privileged escalations must be intercepted by the Human-in-the-Loop (HITL) gateway and rendered in the administrative approval portal with contextual policy citations.
+- **[POL-EXC-402] Execution Lock Mechanism:** The deterministic fulfillment engine remains cryptographically and logically locked for all flagged exception items until an authorized IT Administrator records an explicit approval decision.
+- **[POL-EXC-403] Granular and Partial Authorization:** Administrators reviewing an onboarding request containing both standard baseline items and exception items must be provided the ability to approve baseline items while holding, modifying, or rejecting the exception block independently.
+- **[POL-EXC-404] Administrative Override and Notes:** When overriding an automated exception flag, the approving administrator must enter a documented rationale into the system, confirming that the deviation meets corporate security and budgetary guidelines.
+- **[POL-EXC-405] Automated Rejection Workflow:** If an exception is rejected by the administrator, the fulfillment agent must automatically update the onboarding state to completed-with-exclusions, log the decision, and send a structured rejection notification with the reason to the initiating HR coordinator and department manager.
 
-## 5. Audit & Compliance
-- **[POL-EXC-501] Escalation Logging:** Approved exceptions must permanently record the admin identity, timestamp, and submitted business justification to the compliance audit log[cite: 6].
+## 5. Exception Lifecycle & Expiration
+- **[POL-EXC-501] Standard Exception Longevity:** Any approved non-privileged software or hardware exception shall remain valid for a period not exceeding 90 calendar days from the date of approval, after which the assignment must undergo formal recertification.
+- **[POL-EXC-502] Automated Recertification Alerts:** The directory service and licensing tracker must issue automated renewal prompts to the employee's direct supervisor 14 calendar days prior to the expiration of any time-bound exception entitlement.
+- **[POL-EXC-503] Automatic Deprovisioning on Expiration:** In the absence of an approved recertification request upon reaching the Time-to-Live threshold, the deterministic engine must automatically revoke the exception entitlement, reclaim the assigned seat, and issue an event notification to the user.
+- **[POL-EXC-504] Mid-Lifecycle Transfer Revocation:** When an employee transitions between departments or role baselines, all previously granted access exceptions associated with the former role must be flagged for immediate revocation unless explicitly re-authorized by the receiving department manager.
+
+## 6. Audit Trails & Compliance Reporting
+- **[POL-EXC-601] Immutable Audit Logging:** All exception triage events, including policy rule evaluations, administrative overrides, reviewer identity strings, operational rationales, and execution outcomes, must be written to an immutable transactional database ledger.
+- **[POL-EXC-602] Cryptographic Traceability:** Each approved exception must generate a persistent correlation identifier linking the initial HR onboarding payload, the policy engine recommendation, the administrative approval record, and the downstream license assignment identifier.
+- **[POL-EXC-603] Compliance Inspection Readiness:** Exception records, along with their associated policy citations and approval metadata, must be preserved for a minimum of 7 years in accordance with enterprise data retention and regulatory audit standards.
