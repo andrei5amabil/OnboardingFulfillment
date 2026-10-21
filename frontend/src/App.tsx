@@ -12,7 +12,6 @@ const AppShell: React.FC = () => {
   const { user, role, loading } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavTab>('hr');
 
-  // Set default landing tab when role is resolved
   useEffect(() => {
     if (role === 'new_hire') {
       setCurrentTab('portal');
@@ -25,8 +24,8 @@ const AppShell: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">
+        <Loader2 className="w-7 h-7 animate-spin text-blue-600" />
       </div>
     );
   }
@@ -36,10 +35,10 @@ const AppShell: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white antialiased">
       <Navbar currentTab={currentTab} onTabChange={setCurrentTab} />
 
-      <main className="flex-1">
+      <main className="flex-1 pb-16">
         {currentTab === 'hr' && (role === 'admin' || role === 'hr_manager') && <HrIntakePage />}
         {currentTab === 'it' && (role === 'admin' || role === 'it_manager') && <ITApprovalsPage />}
         {currentTab === 'kpi' && (role === 'admin' || role === 'hr_manager' || role === 'it_manager') && <KPIDashboard />}

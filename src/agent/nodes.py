@@ -17,6 +17,8 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 from langchain_ollama import ChatOllama
 
+from ai_observability import span
+
 env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
@@ -164,8 +166,8 @@ def fetch_context_node(state: OnboardingState) -> dict[str, Any]:
 
 
 def policy_rag_node(state: OnboardingState) -> dict[str, Any]:
-    """Retrieves corporate compliance policies matching the hire context."""
-    citations = retrieve_onboarding_policies(state["candidate_data"])
+    with span(name="retrieve_onboarding_policies", context={"department": state["candidate_data"].get("department")}):
+        citations = retrieve_onboarding_policies(state["candidate_data"])
     return {"citations": citations}
 
 

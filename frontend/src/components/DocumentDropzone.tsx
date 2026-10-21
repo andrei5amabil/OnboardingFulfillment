@@ -16,7 +16,7 @@ interface DocumentDropzoneProps {
 }
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
-const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB limit matching preprocessing.py
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
 export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
   title,
@@ -57,18 +57,18 @@ export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full rounded-xl border border-slate-700 bg-slate-800/60 p-4 transition-colors">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="p-2 rounded-lg bg-slate-700/50 text-indigo-400">
+    <div className="flex flex-col h-full rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="p-2 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
           <Icon className="w-5 h-5" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
-          <p className="text-xs text-slate-400">{description}</p>
+          <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+          <p className="text-xs text-slate-700">{description}</p>
         </div>
       </div>
 
-      {/* Native Drag & Drop Target */}
+      {/* Drag & Drop Box */}
       <div
         onClick={() => !disabled && !isScanning && inputRef.current?.click()}
         onDragOver={(e) => {
@@ -77,12 +77,12 @@ export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
         }}
         onDragLeave={() => setIsDragActive(false)}
         onDrop={handleDrop}
-        className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition-all ${
+        className={`flex-1 min-h-[140px] flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${
           isDragActive
-            ? 'border-indigo-500 bg-indigo-500/10'
+            ? 'border-blue-600 bg-blue-50'
             : isSuccess
-            ? 'border-emerald-500/40 bg-emerald-500/5'
-            : 'border-slate-600 hover:border-slate-500 bg-slate-900/40'
+            ? 'border-emerald-500 bg-emerald-50/50'
+            : 'border-slate-300 hover:border-blue-600 bg-slate-50'
         } ${disabled || isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         <input
@@ -96,22 +96,22 @@ export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
         />
 
         {file ? (
-          <div className="flex flex-col items-center gap-2 text-slate-300">
-            <FileText className="w-8 h-8 text-indigo-400" />
-            <div className="max-w-[200px] truncate text-xs font-medium text-slate-200" title={file.name}>
+          <div className="flex flex-col items-center gap-1.5 text-slate-900">
+            <FileText className="w-8 h-8 text-blue-600" />
+            <div className="max-w-[200px] truncate text-xs font-bold text-slate-900" title={file.name}>
               {file.name}
             </div>
-            <span className="text-[10px] text-slate-400">
+            <span className="text-xs text-slate-700 font-mono font-medium">
               {(file.size / (1024 * 1024)).toFixed(2)} MB
             </span>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-1.5 text-slate-400">
-            <UploadCloud className="w-7 h-7 text-slate-500 mb-1" />
-            <p className="text-xs font-medium text-slate-300">
-              {isDragActive ? 'Drop document here' : 'Drag & drop or browse'}
+          <div className="flex flex-col items-center gap-1 text-slate-700">
+            <UploadCloud className="w-7 h-7 text-slate-600 mb-0.5" />
+            <p className="text-xs font-bold text-slate-900">
+              {isDragActive ? 'Drop file to upload' : 'Click or drag file here'}
             </p>
-            <p className="text-[11px] text-slate-500">PDF, PNG, JPG up to 15MB</p>
+            <p className="text-xs text-slate-700">PDF, PNG, JPG up to 15MB</p>
           </div>
         )}
       </div>
@@ -125,7 +125,7 @@ export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
               e.stopPropagation();
               onFileSelect(null);
             }}
-            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700/50 rounded-lg transition-colors"
+            className="p-2 text-slate-600 hover:text-rose-700 hover:bg-rose-50 border border-slate-300 rounded-lg transition-colors"
             title="Remove file"
           >
             <Trash2 className="w-4 h-4" />
@@ -139,20 +139,24 @@ export const DocumentDropzone: React.FC<DocumentDropzoneProps> = ({
             onScanSingle();
           }}
           disabled={!file || isScanning || disabled}
-          className="flex-1 flex items-center justify-center gap-2 py-2 px-3 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 text-xs font-bold rounded-lg transition-colors shadow-sm ${
+            isSuccess
+              ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300'
+              : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed'
+          }`}
         >
           {isScanning ? (
             <>
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Scanning...
+              <span>Extracting...</span>
             </>
           ) : isSuccess ? (
             <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
-              Re-scan Document
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Re-extract Data</span>
             </>
           ) : (
-            `Scan ${title}`
+            `Extract Data`
           )}
         </button>
       </div>

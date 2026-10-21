@@ -2,7 +2,14 @@ import os
 from urllib import response
 import uuid
 from typing import Literal, Optional
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+
+load_dotenv()
+
+# 2. Initialize the AI Observability SDK early at startup
+from src.observability import workflow, span, shutdown_observability
+
 from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File, Form, UploadFile, Depends
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
@@ -23,10 +30,14 @@ import time
 from src.auth.dependencies import CurrentUser, RequireRoles, get_current_user
 import re
 
-load_dotenv()
 logger = logging.getLogger("uvicorn.error")
 
-app = FastAPI(title="FastAPI + Supabase Setup")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    shutdown_observability()
+
+app = FastAPI(title="FastAPI + Supabase Setup", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,22 +54,18 @@ class Request(BaseModel):
     first_name: str
     last_name: str
     national_id: Optional[str] = None
-
     department: str
     role: str
-    start_date: str  # ISO format date string
+    start_date: str
     employment_type: str
     location: str
     work_location: str
     manager_id: Optional[str] = None
-
     shipping_address: Optional[str] = None
     contact_phone: Optional[str] = None
-
     medical_clearance_status: Optional[bool] = None
     medical_clearance_date: Optional[date] = None
-
-    notes: Optional[str] = ""  # Optional field
+    notes: Optional[str] = ""
     hr_manager_id: str
 
 class DB_Request(BaseModel):
@@ -129,14 +136,21 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         "current_run_id": None,
     }
     try:
-        final_state = onboarding_flow.invoke(initial_state, config=config)
+        # Wrap execution in workflow context; thread_id = request_id correlates future resumes
+        with workflow(
+            name="employee-onboarding",
+            workflow_id=request_id,
+            version="v1",
+            context={"request_id": request_id, "stage": "initial_plan_generation"},
+        ):
+            final_state = onboarding_flow.invoke(initial_state, config=config)
+
         elapsed_sec = round(time.perf_counter() - t0, 2)
         
         prompt_tokens = final_state.get("tokens_prompt", 0)
         completion_tokens = final_state.get("tokens_completion", 0)
         current_run_id = final_state.get("current_run_id")
         
-        # Target execution metrics strictly to this specific run
         if current_run_id:
             supabase.table("workflow_runs").update({
                 "execution_time_seconds": elapsed_sec,
@@ -155,9 +169,7 @@ def kickoff_agent_workflow(request_id: str, *args, **kwargs):
         ).eq("request_id", request_id).execute()
 
 def generate_employee_id() -> str:
-    """Generates the next sequential EMP-00000001 ID, safely ignoring non-integer test/admin IDs."""
     try:
-        # Fetch the most recent 100 employee records to find the highest numeric sequence
         req = (
             supabase.table("employees")
             .select("employee_id")
@@ -165,22 +177,18 @@ def generate_employee_id() -> str:
             .limit(100)
             .execute()
         )
-        
         max_num = 0
         if req.data:
             for row in req.data:
                 emp_id = row.get("employee_id") or ""
-                # Match only IDs strictly following EMP-<digits>
                 match = re.match(r"^EMP-(\d+)$", emp_id)
                 if match:
                     val = int(match.group(1))
                     if val > max_num:
                         max_num = val
 
-        # If no numeric IDs exist yet, start at 1; otherwise increment
         next_num = max_num + 1 if max_num > 0 else 1
 
-        # Safeguard: ensure the candidate ID is unused in both tables
         while True:
             candidate_id = f"EMP-{next_num:08d}"
             emp_check = supabase.table("employees").select("employee_id").eq("employee_id", candidate_id).execute()
@@ -194,14 +202,10 @@ def generate_employee_id() -> str:
         raise HTTPException(status_code=500, detail=f"Error generating employee ID: {str(e)}")
 
 def verify_request_exists(request_id: str) -> bool:
-    """Helper function to check if a request exists in the database."""
     res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).execute()
-    if res.data and len(res.data) > 0:
-        return True
-    return False
+    return bool(res.data and len(res.data) > 0)
 
 def employee_exists(first_name: str, last_name: str) -> tuple[bool, str]:
-    """Helper function to check if an employee already exists in the database."""
     res = supabase.table("onboarding_requests").select("*").eq("first_name", first_name).eq("last_name", last_name).execute()
     if res.data and len(res.data) > 0:
         return (True, "onboarding_requests")
@@ -214,27 +218,16 @@ def employee_exists(first_name: str, last_name: str) -> tuple[bool, str]:
 def check_sb_connection():
     try:
         response = supabase.table("onboarding_requests").select("*").limit(1).execute()
-        return {"status": "success",
-                "message": "Connected to Supabase successfully.", 
-                "data": response.data
-                }
+        return {"status": "success", "message": "Connected to Supabase successfully.", "data": response.data}
     except Exception as e:
         error_str = str(e)
-        
-        # If Supabase returns a PostgREST error (like table doesn't exist),
-        # it confirms the network request reached your local Supabase instance!
         if "PGRST" in error_str or "relation" in error_str or "42P01" in error_str:
             return {
                 "status": "connected",
                 "message": "Local Supabase connection verified! (The 'onboarding_requests' table does not exist yet).",
                 "raw_response": error_str
             }
-        
-        # If Docker is stopped or URL is wrong
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not reach local Supabase instance: {error_str}"
-        )
+        raise HTTPException(status_code=500, detail=f"Could not reach local Supabase instance: {error_str}")
 
 @app.post(
     "/onboarding/extract-document",
@@ -246,22 +239,24 @@ def extract_document(
     document_type: DocumentType = Form(...),
     user: CurrentUser = Depends(RequireRoles(["hr_manager"])),
 ):
-    """Processes an uploaded document (PDF or Image) through Track A + Track B and returns arbitrated data."""
     try:
         file_bytes = file.file.read()
-        result = DocumentExtractionService.process_document(
-            file_bytes=file_bytes,
-            filename=file.filename or "uploaded_document",
-            doc_type=document_type,
-            content_type=file.content_type,
-        )
+        # Optional: trace document extraction as its own execution
+        with workflow(
+            name="document-extraction",
+            version="v1",
+            context={"filename": file.filename or "uploaded_document", "doc_type": str(document_type)},
+        ):
+            result = DocumentExtractionService.process_document(
+                file_bytes=file_bytes,
+                filename=file.filename or "uploaded_document",
+                doc_type=document_type,
+                content_type=file.content_type,
+            )
         return result
     except ValueError as ve:
         logger.error(f"❌ Document extraction ValueError for {file.filename}: {ve}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve),
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
 
 @app.post("/onboarding/requests", status_code=status.HTTP_200_OK)
 def create_onboarding_request(
@@ -286,7 +281,7 @@ def create_onboarding_request(
             elif table_name == "employees":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"An employee record for {item.first_name} {item.last_name} already exists. If this is intentional, add a digit to the name to differentiate (e.g., John Doe 2).",
+                    detail=f"An employee record for {item.first_name} {item.last_name} already exists.",
                 )   
         db_item = {
             "request_id": request_id,
@@ -373,11 +368,22 @@ def resume_regeneration_workflow(
     config = {"configurable": {"thread_id": request_id}}
     
     try:
-        if reconstructed_state:
-            onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
-            final_state = onboarding_flow.invoke(None, config=config)
-        else:
-            final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+        # Re-attach to the same logical workflow trace using workflow_id=request_id
+        with workflow(
+            name="employee-onboarding",
+            workflow_id=request_id,
+            version="v1",
+            context={
+                "request_id": request_id, 
+                "stage": "plan_regeneration",
+                "reviewer": resume_data.get("reviewed_by"),
+            },
+        ):
+            if reconstructed_state:
+                onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
+                final_state = onboarding_flow.invoke(None, config=config)
+            else:
+                final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
 
         elapsed_sec = round(time.perf_counter() - t0, 2)
         prompt_tokens = final_state.get("tokens_prompt", 0)
@@ -424,7 +430,6 @@ def review_onboarding_plan(
     }
 
     try:
-        # 1. Update review notes on the latest completed run
         latest_run = (
             supabase.table("workflow_runs")
             .select("run_id")
@@ -442,7 +447,6 @@ def review_onboarding_plan(
                 "reviewed_at": now_iso,
             }).eq("run_id", current_run_id).execute()
 
-        # Build rehydrated state fallback if in-memory checkpointer lost state
         reconstructed_state = None
         if not state_snapshot.tasks:
             req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
@@ -497,7 +501,6 @@ def review_onboarding_plan(
         # PATH A: REGENERATE (Non-blocking background execution)
         # -------------------------------------------------------------
         if payload.action == "regenerate":
-            # Set request to processing so the UI displays the working spinner
             supabase.table("onboarding_requests").update(
                 {"status": "processing_rules"}
             ).eq("request_id", request_id).execute()
@@ -516,15 +519,24 @@ def review_onboarding_plan(
             }
 
         # -------------------------------------------------------------
-        # PATH B: APPROVE (Synchronous deterministic RPC execution)
+        # PATH B: APPROVE (Synchronous deterministic execution)
         # -------------------------------------------------------------
-        if reconstructed_state:
-            onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
-            final_state = onboarding_flow.invoke(None, config=config)
-        else:
-            final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+        with workflow(
+            name="employee-onboarding",
+            workflow_id=request_id,
+            version="v1",
+            context={
+                "request_id": request_id, 
+                "stage": "approval_and_provisioning",
+                "reviewer": reviewer,
+            },
+        ):
+            if reconstructed_state:
+                onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
+                final_state = onboarding_flow.invoke(None, config=config)
+            else:
+                final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
 
-        # Check for rollback from RPC
         if final_state.get("status") == "provisioning_failed":
             err_msg = final_state.get("provisioning_error") or "Transaction rolled back during atomic provisioning."
             logger.error("❌ Atomic provisioning failed for %s: %s", request_id, err_msg)
@@ -533,7 +545,6 @@ def review_onboarding_plan(
                 detail=f"Provisioning aborted and rolled back: {err_msg}"
             )
 
-        # Calculate lead time only on successful approval
         req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
         lead_time_sec = 0.0
         if req_data and req_data.get("created_at"):
@@ -561,27 +572,22 @@ def review_onboarding_plan(
 @app.get("/analytics/kpis", response_model=KPIResponse)
 def get_onboarding_kpis(user: CurrentUser = Depends(RequireRoles(["hr_manager", "it_manager", "admin"]))):
     try:
-        # Fetch requests with runs
         reqs = supabase.table("onboarding_requests").select("*, workflow_runs(*)").execute().data or []
         runs = supabase.table("workflow_runs").select("*").execute().data or []
         
-        total_runs = len(runs)
         completed_reqs = [r for r in reqs if r.get("status") == "completed"]
         
-        # 1. Token Metrics
         total_tokens = sum(r.get("tokens_total", 0) for r in runs)
         avg_tokens = round(total_tokens / len(reqs), 1) if reqs else 0.0
         prompt_tokens = sum(r.get("tokens_prompt", 0) for r in runs)
         comp_tokens = sum(r.get("tokens_completion", 0) for r in runs)
 
-        # 2. Execution Time Metrics
         durations = [float(r.get("execution_time_seconds", 0)) for r in runs if r.get("execution_time_seconds")]
         avg_agent_sec = round(sum(durations) / len(durations), 2) if durations else 0.0
         
         lead_times = [float(r.get("total_lead_time_seconds", 0)) for r in completed_reqs if r.get("total_lead_time_seconds")]
         avg_lead_sec = round(sum(lead_times) / len(lead_times), 2) if lead_times else 0.0
 
-        # 3. HITL Pass Rate
         first_pass_approved = sum(
             1 for r in runs 
             if r.get("review_action") == "approve" and r.get("attempt_number") == 1
@@ -614,17 +620,14 @@ def get_onboarding_kpis(user: CurrentUser = Depends(RequireRoles(["hr_manager", 
 
 @app.get("/portal/me")
 def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire"]))):
-    """Returns onboarding and provisioned entitlement data for the logged-in employee."""
     if not user.employee_id:
         return {
             "status": "pending_linking",
             "message": "Your employee account has not been linked to an onboarding record yet. Please contact HR.",
         }
 
-    # Fetch employee profile
     emp_res = supabase.table("employees").select("*").eq("employee_id", user.employee_id).execute()
     if not emp_res.data:
-        # Check onboarding request if not finalized into employees yet
         req_res = supabase.table("onboarding_requests").select("*, workflow_runs(*)").eq("employee_id", user.employee_id).execute()
         if not req_res.data:
             raise HTTPException(status_code=404, detail="Employee record not found.")

@@ -29,7 +29,6 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-// 1. Initial form state blueprint
 const getInitialFormData = () => ({
   first_name: '',
   last_name: '',
@@ -56,10 +55,7 @@ const INITIAL_SCANNED_DOCS = {
 };
 
 export const HrIntakePage: React.FC = () => {
-  // Key to force reset DocumentIngestion component
   const [ingestionKey, setIngestionKey] = useState<number>(0);
-
-  // Scanned docs cache for cross-validation
   const [, setScannedDocuments] = useState<{
     contract: Record<string, any>;
     national_id: Record<string, any>;
@@ -67,14 +63,10 @@ export const HrIntakePage: React.FC = () => {
   }>(INITIAL_SCANNED_DOCS);
 
   const [validationAlerts, setValidationAlerts] = useState<ValidationAlert[]>([]);
-
-  // Form State
   const [formData, setFormData] = useState(getInitialFormData());
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResponse, setSubmitResponse] = useState<{ status: 'success' | 'error'; message: string; data?: any } | null>(null);
 
-  // Handle Extraction Callback from DocumentIngestion
   const handleExtractionSuccess = (docType: DocumentType, payload: ExtractionResponse) => {
     const extracted = payload.data as any;
 
@@ -140,7 +132,7 @@ export const HrIntakePage: React.FC = () => {
     setSubmitResponse(null);
 
     if (!formData.first_name.trim() || !formData.last_name.trim() || !formData.role || !formData.start_date) {
-      alert('Please fill in all mandatory fields: First Name, Last Name, Role, and Start Date.');
+      alert('Please fill in First Name, Last Name, Role, and Start Date.');
       return;
     }
 
@@ -152,7 +144,7 @@ export const HrIntakePage: React.FC = () => {
 
     let finalNotes = formData.notes.trim();
     if (criticalNotes.length > 0) {
-      finalNotes += '\n\n### AUTOMATED DOCUMENT DISCREPANCY FLAGS:\n' + criticalNotes.join('\n');
+      finalNotes += '\n\nDISCREPANCY FLAGS:\n' + criticalNotes.join('\n');
     }
 
     const payload = {
@@ -186,20 +178,19 @@ export const HrIntakePage: React.FC = () => {
 
       setSubmitResponse({
         status: 'success',
-        message: `Onboarding request ${data.data?.request_id || ''} created for ${payload.first_name} ${payload.last_name}! Workflow initialized.`,
+        message: `Request ${data.data?.request_id || ''} created for ${payload.first_name} ${payload.last_name}.`,
         data: data.data,
       });
 
-      // --- CLEAR ALL FIELDS & DROPZONES ---
       setFormData(getInitialFormData());
       setScannedDocuments(INITIAL_SCANNED_DOCS);
       setValidationAlerts([]);
-      setIngestionKey((prev) => prev + 1); // Remounts DocumentIngestion to clear files
+      setIngestionKey((prev) => prev + 1);
 
     } catch (err: any) {
       setSubmitResponse({
         status: 'error',
-        message: err.message || 'Unable to connect to backend server.',
+        message: err.message || 'Server connection error.',
       });
     } finally {
       setIsSubmitting(false);
@@ -207,45 +198,45 @@ export const HrIntakePage: React.FC = () => {
   };
 
   const availableRoles = DEPARTMENT_ROLE_MAPPING[formData.department] || [];
+  const inputClass = "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors";
+  const labelClass = "block text-xs font-bold text-slate-900 mb-1";
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">
-          📝 Assisted Employee Onboarding Intake
+        <h1 className="text-2xl font-black tracking-tight text-slate-900">
+          Employee Intake
         </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Upload candidate documents to pre-fill identity, contract, logistics, and compliance data.
+        <p className="text-xs text-slate-700 mt-1">
+          Ingest documents to populate records and initiate provisioning.
         </p>
       </div>
 
-      {/* 1. Document Ingestion Dropzones with dynamic key */}
       <DocumentIngestion
         key={ingestionKey}
         apiBaseUrl={API_BASE_URL}
         onExtractionSuccess={handleExtractionSuccess}
       />
 
-      {/* Cross-Document Validation Alerts */}
       {validationAlerts.length > 0 && (
         <div className="space-y-2">
           {validationAlerts.map((alert, idx) => (
             <div
               key={idx}
-              className={`p-3 rounded-lg flex items-start gap-2.5 text-xs font-medium border ${
+              className={`p-3 rounded-lg flex items-start gap-2.5 text-xs font-semibold border ${
                 alert.severity === 'critical'
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                  ? 'bg-rose-50 border-rose-300 text-rose-950'
                   : alert.severity === 'warning'
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                  : 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+                  ? 'bg-amber-50 border-amber-300 text-amber-950'
+                  : 'bg-blue-50 border-blue-300 text-blue-950'
               }`}
             >
               {alert.severity === 'critical' ? (
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-700 mt-0.5" />
               ) : alert.severity === 'warning' ? (
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-700 mt-0.5" />
               ) : (
-                <Info className="w-4 h-4 shrink-0 text-sky-400 mt-0.5" />
+                <Info className="w-4 h-4 shrink-0 text-blue-700 mt-0.5" />
               )}
               <div>
                 <span className="uppercase font-bold tracking-wider mr-1.5">{alert.field}:</span>
@@ -256,94 +247,99 @@ export const HrIntakePage: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Candidate Profile & Review Form */}
       <form onSubmit={handleSubmit} className="space-y-6">
-        <h2 className="text-lg font-bold text-slate-100">2. Candidate Profile & Review</h2>
+        <div className="border-b border-slate-300 pb-2">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+            Candidate Profile
+          </h2>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Column 1: Identity & Role */}
-          <div className="bg-slate-800/40 border border-slate-700/80 rounded-xl p-5 space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-slate-700/50 text-indigo-400 font-semibold text-sm">
+          {/* Identity & Role */}
+          <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-slate-200 text-blue-700 font-bold text-xs uppercase tracking-wider">
               <User className="w-4 h-4" />
-              <span>Identity & Role</span>
+              <span>Identity & Organization</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">First Name *</label>
+                <label className={labelClass}>First Name *</label>
                 <input
                   type="text"
                   required
                   value={formData.first_name}
                   onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Last Name *</label>
+                <label className={labelClass}>Last Name *</label>
                 <input
                   type="text"
                   required
                   value={formData.last_name}
                   onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">National ID / CNP</label>
+              <label className={labelClass}>National ID / CNP</label>
               <input
                 type="text"
                 value={formData.national_id}
                 onChange={(e) => setFormData({ ...formData, national_id: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                className={inputClass}
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Department *</label>
-              <select
-                value={formData.department}
-                onChange={(e) => handleDepartmentChange(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-              >
-                {DEPARTMENTS.map((dept) => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Role *</label>
-              <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-              >
-                {availableRoles.map((role) => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
-              </select>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Start Date *</label>
+                <label className={labelClass}>Department *</label>
+                <select
+                  value={formData.department}
+                  onChange={(e) => handleDepartmentChange(e.target.value)}
+                  className={inputClass}
+                >
+                  {DEPARTMENTS.map((dept) => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={labelClass}>Role *</label>
+                <select
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  className={inputClass}
+                >
+                  {availableRoles.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Start Date *</label>
                 <input
                   type="date"
                   required
                   value={formData.start_date}
                   onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Employment Type</label>
+                <label className={labelClass}>Employment Type</label>
                 <select
                   value={formData.employment_type}
                   onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 >
                   {EMPLOYMENT_TYPE_OPTIONS.map((type) => (
                     <option key={type} value={type}>{type}</option>
@@ -353,31 +349,31 @@ export const HrIntakePage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Manager ID (Optional)</label>
+              <label className={labelClass}>Manager ID</label>
               <input
                 type="text"
-                placeholder="e.g. EMP-0010"
+                placeholder="EMP-0010"
                 value={formData.manager_id}
                 onChange={(e) => setFormData({ ...formData, manager_id: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                className={inputClass}
               />
             </div>
           </div>
 
-          {/* Column 2: Logistics & Compliance */}
-          <div className="bg-slate-800/40 border border-slate-700/80 rounded-xl p-5 space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-slate-700/50 text-indigo-400 font-semibold text-sm">
+          {/* Logistics & Compliance */}
+          <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-slate-200 text-blue-700 font-bold text-xs uppercase tracking-wider">
               <Briefcase className="w-4 h-4" />
               <span>Logistics & Compliance</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Office Location</label>
+                <label className={labelClass}>Office Location</label>
                 <select
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 >
                   {LOCATION_OPTIONS.map((loc) => (
                     <option key={loc} value={loc}>{loc}</option>
@@ -386,11 +382,11 @@ export const HrIntakePage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Work Arrangement</label>
+                <label className={labelClass}>Work Arrangement</label>
                 <select
                   value={formData.work_location}
                   onChange={(e) => setFormData({ ...formData, work_location: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className={inputClass}
                 >
                   {WORK_LOCATION_OPTIONS.map((wl) => (
                     <option key={wl} value={wl}>{wl}</option>
@@ -400,51 +396,49 @@ export const HrIntakePage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Delivery Address (Required for Remote/Hybrid)
-              </label>
+              <label className={labelClass}>Delivery Address</label>
               <textarea
                 rows={2}
                 value={formData.shipping_address}
                 onChange={(e) => setFormData({ ...formData, shipping_address: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"
+                className={`${inputClass} resize-none`}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Contact Phone</label>
+              <label className={labelClass}>Contact Phone</label>
               <input
                 type="text"
                 value={formData.contact_phone}
                 onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                className={inputClass}
               />
             </div>
 
-            <div className="pt-2 border-t border-slate-700/50 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-                <HeartPulse className="w-4 h-4 text-emerald-400" />
-                <span>Medical Clearance Gatekeeper</span>
+            <div className="pt-2 border-t border-slate-200 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                <HeartPulse className="w-4 h-4 text-emerald-700" />
+                <span>Medical Clearance</span>
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-900">
                 <input
                   type="checkbox"
                   checked={formData.medical_clearance_status}
                   onChange={(e) => setFormData({ ...formData, medical_clearance_status: e.target.checked })}
-                  className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0"
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-600 w-4 h-4"
                 />
-                <span>Medical Clearance Confirmed (Fit for Work)</span>
+                <span className="font-bold">Medical Clearance Verified</span>
               </label>
 
               {formData.medical_clearance_status && (
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Examination Date</label>
+                  <label className={labelClass}>Examination Date</label>
                   <input
                     type="date"
                     value={formData.medical_clearance_date}
                     onChange={(e) => setFormData({ ...formData, medical_clearance_date: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                    className={inputClass}
                   />
                 </div>
               )}
@@ -452,37 +446,34 @@ export const HrIntakePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Notes */}
-        <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
-            Additional Onboarding Notes (Special Software/Hardware Requests)
-          </label>
+        <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm">
+          <label className={labelClass}>Additional Notes</label>
           <textarea
-            rows={3}
+            rows={2}
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+            placeholder="Special provisions, access requirements, or software requests"
+            className={`${inputClass} resize-none`}
           />
         </div>
 
-        {/* Feedback Alert */}
         {submitResponse && (
           <div
-            className={`p-4 rounded-xl border flex items-start gap-3 text-xs ${
+            className={`p-4 rounded-xl border flex items-start gap-3 text-xs font-medium ${
               submitResponse.status === 'success'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                : 'bg-rose-50 border-rose-300 text-rose-950'
             }`}
           >
             {submitResponse.status === 'success' ? (
-              <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+              <CheckCircle className="w-5 h-5 text-emerald-700 shrink-0" />
             ) : (
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              <AlertCircle className="w-5 h-5 text-rose-700 shrink-0" />
             )}
             <div className="space-y-1">
-              <p className="font-semibold">{submitResponse.message}</p>
+              <p className="font-bold text-sm">{submitResponse.message}</p>
               {submitResponse.data && (
-                <pre className="p-2 bg-slate-950/60 rounded text-[11px] overflow-x-auto text-slate-400">
+                <pre className="p-3 bg-slate-900 text-slate-100 rounded-lg text-xs overflow-x-auto mt-2 font-mono">
                   {JSON.stringify(submitResponse.data, null, 2)}
                 </pre>
               )}
@@ -490,21 +481,20 @@ export const HrIntakePage: React.FC = () => {
           </div>
         )}
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           {isSubmitting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Initiating Onboarding Workflow...</span>
+              <span>Initiating Workflow...</span>
             </>
           ) : (
             <>
               <Send className="w-4 h-4" />
-              <span>Initiate Onboarding</span>
+              <span>Submit Candidate</span>
             </>
           )}
         </button>

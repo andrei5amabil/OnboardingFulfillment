@@ -3,11 +3,8 @@ import {
   Zap, 
   Timer, 
   CheckCircle2, 
-  AlertTriangle, 
   TrendingUp, 
   RotateCw, 
-  Cpu, 
-  ArrowUpRight 
 } from 'lucide-react';
 import type { KPIData } from '../types/analytics';
 import { fetchWithAuth } from '../lib/api';
@@ -38,9 +35,9 @@ export const KPIDashboard: React.FC = () => {
 
   if (loading && !data) {
     return (
-      <div className="flex h-96 items-center justify-center text-slate-400">
-        <RotateCw className="w-6 h-6 animate-spin mr-2" />
-        Loading telemetry data...
+      <div className="flex h-96 items-center justify-center text-slate-700 font-bold text-sm">
+        <RotateCw className="w-5 h-5 animate-spin mr-2 text-blue-600" />
+        Loading telemetry...
       </div>
     );
   }
@@ -48,145 +45,131 @@ export const KPIDashboard: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-slate-300 pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-100 flex items-center gap-2">
-            <span>📈 System Efficiency & AI Telemetry</span>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900">
+            System Telemetry
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time insights across LLM computational cost, latency targets, and HITL gatekeeper efficacy.
+          <p className="text-xs text-slate-700 mt-0.5">
+            Operational latency, token consumption, and approval accuracy.
           </p>
         </div>
         <button
           onClick={fetchKPIs}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700 hover:bg-slate-700"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white text-xs font-bold text-slate-800 border border-slate-300 hover:bg-slate-100 shadow-sm transition-colors"
         >
           <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Metrics
+          Refresh
         </button>
       </div>
 
-      {/* Top 3 Metric Cards */}
+      {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* KPI 1: Token Usage */}
-        <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-5 space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Avg LLM Consumption</span>
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
+        <div className="bg-white border border-slate-300 rounded-xl p-5 space-y-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Tokens / Candidate</span>
+            <div className="p-2 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
               <Zap className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold text-slate-100 font-mono">
-              {data?.avg_tokens_per_employee.toLocaleString()} <span className="text-sm font-normal text-slate-400">tokens</span>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">Per candidate (Extraction + Agent Planner)</p>
+          <div className="text-3xl font-black text-slate-900 font-mono">
+            {data?.avg_tokens_per_employee.toLocaleString()}
           </div>
-          <div className="pt-3 border-t border-slate-700/50 flex justify-between text-[11px] text-slate-400 font-mono">
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-bold text-slate-700 font-mono">
             <span>Prompt: {data?.token_usage_breakdown.prompt.toLocaleString()}</span>
             <span>Completion: {data?.token_usage_breakdown.completion.toLocaleString()}</span>
           </div>
         </div>
 
-        {/* KPI 2: Execution Latency */}
-        <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-5 space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Agent Planning Latency</span>
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+        <div className="bg-white border border-slate-300 rounded-xl p-5 space-y-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Planning Latency</span>
+            <div className="p-2 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
               <Timer className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold text-slate-100 font-mono">
-              {data?.avg_agent_execution_seconds}s
-            </div>
-            <p className="text-xs text-slate-400 mt-1">Average time to HITL gateway pause</p>
+          <div className="text-3xl font-black text-slate-900 font-mono">
+            {data?.avg_agent_execution_seconds}s
           </div>
-          <div className="pt-3 border-t border-slate-700/50 flex justify-between text-[11px] text-slate-400">
-            <span>Total Lead Time (End-to-End):</span>
-            <span className="font-mono text-slate-200">{data?.avg_total_lead_time_seconds}s</span>
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-700">
+            <span>Total Lead Time:</span>
+            <span className="font-mono font-bold text-slate-900">{data?.avg_total_lead_time_seconds}s</span>
           </div>
         </div>
 
-        {/* KPI 3: HITL Quality & Pass Rate */}
-        <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-5 space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium uppercase tracking-wider">HITL 1st-Pass Approval</span>
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+        <div className="bg-white border border-slate-300 rounded-xl p-5 space-y-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Approval Rate</span>
+            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold text-emerald-400 font-mono">
-              {data?.first_pass_approval_rate}%
-            </div>
-            <p className="text-xs text-slate-400 mt-1">Accepted without revision request</p>
+          <div className="text-3xl font-black text-emerald-700 font-mono">
+            {data?.first_pass_approval_rate}%
           </div>
-          <div className="pt-3 border-t border-slate-700/50 flex justify-between text-[11px] text-slate-400">
-            <span>Escalation Rate (&gt;3 attempts):</span>
-            <span className="font-mono text-rose-400">{data?.escalation_rate}%</span>
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-700">
+            <span>Escalation Rate:</span>
+            <span className="font-mono font-bold text-rose-700">{data?.escalation_rate}%</span>
           </div>
         </div>
       </div>
 
-      {/* Operational Efficiency Benchmark */}
-      <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-6">
-        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-indigo-400" />
-          <span>Operational Benchmark vs Traditional Process</span>
+      {/* Benchmark Summary */}
+      <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm">
+        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-blue-700" />
+          <span>Operational Benchmark</span>
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-            <span className="text-xs font-semibold text-rose-400 uppercase">Legacy Method (Manual IT/HR)</span>
-            <div className="text-xl font-bold text-slate-300">3–5 Business Days (24–40h Lead Time)</div>
-            <p className="text-xs text-slate-400">~3-4 hours hands-on time across 7+ manual touchpoints.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="text-xs font-bold text-slate-700 uppercase">Legacy Method</div>
+            <div className="text-lg font-black text-slate-900 mt-1">3–5 Business Days</div>
           </div>
-          <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/30 space-y-2">
-            <span className="text-xs font-semibold text-emerald-400 uppercase">AI Automated System (TO-BE)</span>
-            <div className="text-xl font-bold text-slate-100 font-mono">
-              ~{((data?.avg_total_lead_time_seconds || 120) / 60).toFixed(1)} Minutes Total Lead Time
+          <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+            <div className="text-xs font-bold text-blue-700 uppercase">Automated Pipeline</div>
+            <div className="text-lg font-black text-slate-900 font-mono mt-1">
+              ~{((data?.avg_total_lead_time_seconds || 120) / 60).toFixed(1)} Minutes
             </div>
-            <p className="text-xs text-slate-400">&gt;95% reduction in operational latency; 1-click HITL approval gate.</p>
           </div>
         </div>
       </div>
 
-      {/* Recent Workflow Execution Telemetry Table */}
-      <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-6 space-y-4">
-        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
-          Recent Execution Log
+      {/* Execution Log */}
+      <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm space-y-3">
+        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+          Execution Log
         </h2>
-        <div className="overflow-x-auto rounded-lg border border-slate-700/80">
+        <div className="overflow-x-auto rounded-lg border border-slate-300">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900/80 text-slate-400 border-b border-slate-700/80">
+            <thead className="bg-slate-100 text-slate-800 border-b border-slate-300 font-bold uppercase tracking-wider text-[11px]">
               <tr>
-                <th className="p-3">Request ID</th>
-                <th className="p-3">Attempt</th>
-                <th className="p-3">Agent Latency</th>
-                <th className="p-3">Tokens Total</th>
-                <th className="p-3">Review Action</th>
-                <th className="p-3">Timestamp</th>
+                <th className="p-2.5">Request ID</th>
+                <th className="p-2.5">Attempt</th>
+                <th className="p-2.5">Latency</th>
+                <th className="p-2.5">Tokens</th>
+                <th className="p-2.5">Action</th>
+                <th className="p-2.5">Timestamp</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800 bg-slate-900/40 text-slate-300 font-mono">
+            <tbody className="divide-y divide-slate-200 bg-white text-slate-900 font-mono font-medium">
               {data?.recent_runs.map((run, idx) => (
-                <tr key={idx} className="hover:bg-slate-800/30">
-                  <td className="p-3 font-semibold text-indigo-400">{run.request_id}</td>
-                  <td className="p-3">#{run.attempt_number}</td>
-                  <td className="p-3">{run.execution_time_seconds}s</td>
-                  <td className="p-3">{run.tokens_total?.toLocaleString() || '-'}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                <tr key={idx} className="hover:bg-slate-50">
+                  <td className="p-2.5 font-bold text-blue-700">{run.request_id}</td>
+                  <td className="p-2.5 text-slate-800">#{run.attempt_number}</td>
+                  <td className="p-2.5 text-slate-800">{run.execution_time_seconds}s</td>
+                  <td className="p-2.5 text-slate-800">{run.tokens_total?.toLocaleString() || '-'}</td>
+                  <td className="p-2.5">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
                       run.review_action === 'approve'
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                         : run.review_action === 'regenerate'
-                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        : 'bg-slate-800 text-slate-400'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                        : 'bg-slate-100 text-slate-800 border-slate-300'
                     }`}>
                       {run.review_action || 'pending'}
                     </span>
                   </td>
-                  <td className="p-3 text-slate-500 text-[11px]">
+                  <td className="p-2.5 text-slate-700 text-xs font-sans">
                     {new Date(run.created_at).toLocaleTimeString()}
                   </td>
                 </tr>

@@ -6,9 +6,7 @@ import {
   BarChart3,
   UserCheck,
   LogOut,
-  ShieldAlert,
-  Copy,
-  Check,
+  ShieldCheck,
 } from 'lucide-react';
 
 export type NavTab = 'hr' | 'it' | 'kpi' | 'portal';
@@ -30,77 +28,48 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
     }
   };
 
-  const handleLogout = async () => {
-    await signOut();
-  };
+  const navButtonClass = (tab: NavTab) =>
+    `flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+      currentTab === tab
+        ? 'bg-blue-50 text-blue-700 font-semibold border border-blue-200'
+        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+    }`;
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
+    <header className="border-b border-slate-200 bg-white/95 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 font-bold text-slate-100 tracking-tight">
-            <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
-              <ShieldAlert className="w-4 h-4" />
+          <div className="flex items-center gap-2.5 font-bold text-slate-900 tracking-tight">
+            <div className="p-1.5 bg-blue-600 rounded-lg text-white shadow-sm">
+              <ShieldCheck className="w-4 h-4" />
             </div>
             <span>AutoOnboard</span>
           </div>
 
           <nav className="flex items-center gap-1">
-            {/* HR Intake Tab */}
             {(role === 'admin' || role === 'hr_manager') && (
-              <button
-                onClick={() => onTabChange('hr')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  currentTab === 'hr'
-                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-              >
+              <button onClick={() => onTabChange('hr')} className={navButtonClass('hr')}>
                 <FileText className="w-3.5 h-3.5" />
                 <span>HR Intake</span>
               </button>
             )}
 
-            {/* IT Approvals Tab */}
             {(role === 'admin' || role === 'it_manager') && (
-              <button
-                onClick={() => onTabChange('it')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  currentTab === 'it'
-                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-              >
+              <button onClick={() => onTabChange('it')} className={navButtonClass('it')}>
                 <CheckSquare className="w-3.5 h-3.5" />
                 <span>IT Approvals</span>
               </button>
             )}
 
-            {/* KPI Telemetry Tab */}
             {(role === 'admin' || role === 'hr_manager' || role === 'it_manager') && (
-              <button
-                onClick={() => onTabChange('kpi')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  currentTab === 'kpi'
-                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-              >
+              <button onClick={() => onTabChange('kpi')} className={navButtonClass('kpi')}>
                 <BarChart3 className="w-3.5 h-3.5" />
                 <span>Telemetry</span>
               </button>
             )}
 
-            {/* New Hire Hub Tab */}
             {(role === 'admin' || role === 'new_hire') && (
-              <button
-                onClick={() => onTabChange('portal')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  currentTab === 'portal'
-                    ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-              >
+              <button onClick={() => onTabChange('portal')} className={navButtonClass('portal')}>
                 <UserCheck className="w-3.5 h-3.5" />
                 <span>New Hire Hub</span>
               </button>
@@ -109,29 +78,30 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Clickable Corporate Email with Copy Feedback */}
           <button
             type="button"
             onClick={handleCopyEmail}
             title="Click to copy work email"
-            className="group flex flex-col text-right hover:opacity-95 transition-opacity focus:outline-none"
+            className="group flex flex-col text-right hover:opacity-85 transition-opacity focus:outline-none"
           >
-            <span className="text-xs font-medium text-slate-200 group-hover:text-indigo-400 flex items-center justify-end gap-1.5 transition-colors">
-              <span>{user?.email}</span>
+            <span className="text-xs font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
+              {user?.email}
             </span>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-indigo-400">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 group-hover:text-slate-600">
               {copiedEmail ? (
-                <span className="text-emerald-400 font-sans normal-case">Copied to clipboard</span>
+                <span className="text-emerald-600 font-sans normal-case font-medium">Copied!</span>
               ) : (
-                role
+                role?.replace('_', ' ')
               )}
             </span>
           </button>
 
+          <div className="h-4 w-px bg-slate-200 mx-1" />
+
           <button
-            onClick={handleLogout}
+            onClick={() => signOut()}
             title="Sign Out"
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800 transition-colors"
+            className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 transition-colors"
           >
             <LogOut className="w-4 h-4" />
           </button>

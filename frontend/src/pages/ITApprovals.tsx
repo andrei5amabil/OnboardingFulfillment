@@ -23,12 +23,10 @@ export const ITApprovalsPage: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Per-task interaction states
   const [selectedDiscretionary, setSelectedDiscretionary] = useState<Record<string, string[]>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
-  // Fetch tasks (silent=true avoids full-screen spinner on background sync)
   const fetchTasks = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     else setIsSyncing(true);
@@ -42,7 +40,6 @@ export const ITApprovalsPage: React.FC = () => {
       const pending = data.filter((t) => t.status !== 'completed');
       setTasks(pending);
 
-      // Preserve existing selections or set default discretionary choices
       setSelectedDiscretionary((prev) => {
         const next = { ...prev };
         pending.forEach((task) => {
@@ -54,19 +51,17 @@ export const ITApprovalsPage: React.FC = () => {
         return next;
       });
     } catch (err: any) {
-      setError(err.message || 'Could not load pending tasks from backend.');
+      setError(err.message || 'Could not load tasks.');
     } finally {
       setIsLoading(false);
       setIsSyncing(false);
     }
   }, []);
 
-  // 1. Initial Load
   useEffect(() => {
     fetchTasks(false);
   }, [fetchTasks]);
 
-  // 2. Reactive Auto-Polling: Activates ONLY when any task is actively processing
   const hasProcessingTasks = useMemo(
     () => tasks.some((t) => t.status === 'processing_rules'),
     [tasks]
@@ -74,32 +69,24 @@ export const ITApprovalsPage: React.FC = () => {
 
   useEffect(() => {
     if (!hasProcessingTasks) return;
-
-    // Poll every 2.5s while LangGraph is running rules/retrievals
     const interval = setInterval(() => {
       fetchTasks(true);
     }, 2500);
-
     return () => clearInterval(interval);
   }, [hasProcessingTasks, fetchTasks]);
 
-  // 3. Supabase Realtime Listener: Instantly refreshes on table updates
   useEffect(() => {
     const channel = supabase
       .channel('schema-db-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'onboarding_requests' },
-        () => {
-          fetchTasks(true);
-        }
+        () => fetchTasks(true)
       )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'workflow_runs' },
-        () => {
-          fetchTasks(true);
-        }
+        () => fetchTasks(true)
       )
       .subscribe();
 
@@ -124,7 +111,7 @@ export const ITApprovalsPage: React.FC = () => {
       const res = await fetchWithAuth(`${API_BASE_URL}/onboarding/requests/${requestId}/generate-plan`, {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Failed to queue plan generation.');
+      if (!res.ok) throw new Error('Failed to start plan generation.');
       await fetchTasks(true);
     } catch (err: any) {
       alert(err.message);
@@ -165,32 +152,27 @@ export const ITApprovalsPage: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-300 pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-100 flex items-center gap-2">
-            <span>🛠️ IT Provisioning & Approvals</span>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900">
+            IT Approvals
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Review agent-generated access plans, request revisions, or commit deterministic provisioning.
+          <p className="text-xs text-slate-700 mt-1">
+            Review access entitlements and authorize provisioning pipelines.
           </p>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          {/* Live Sync Status Pill */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-400">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-mono font-semibold text-slate-800 shadow-sm">
             <Radio
               className={`w-3.5 h-3.5 ${
                 hasProcessingTasks || isSyncing
-                  ? 'text-amber-400 animate-pulse'
-                  : 'text-emerald-400'
+                  ? 'text-amber-600 animate-pulse'
+                  : 'text-emerald-600'
               }`}
             />
             <span>
-              {hasProcessingTasks
-                ? 'Agent Working...'
-                : isSyncing
-                ? 'Syncing...'
-                : 'Realtime Connected'}
+              {hasProcessingTasks ? 'Processing' : isSyncing ? 'Syncing' : 'Connected'}
             </span>
           </div>
 
@@ -198,7 +180,7 @@ export const ITApprovalsPage: React.FC = () => {
             type="button"
             onClick={() => fetchTasks(false)}
             disabled={isLoading}
-            className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 disabled:opacity-50 transition-colors shadow-sm"
           >
             <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -207,18 +189,17 @@ export const ITApprovalsPage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center gap-3 text-xs text-rose-300">
-          <AlertCircle className="w-5 h-5 shrink-0" />
+        <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-center gap-2.5 text-xs font-bold text-rose-950">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-700" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Task Queue */}
       {tasks.length === 0 && !isLoading ? (
-        <div className="p-12 text-center border border-slate-800 bg-slate-900/50 rounded-2xl">
-          <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto mb-3 opacity-80" />
-          <h3 className="text-base font-semibold text-slate-200">No actions awaiting IT approval</h3>
-          <p className="text-xs text-slate-500 mt-1">All onboarding pipelines have been finalized.</p>
+        <div className="p-12 text-center border border-slate-300 bg-white rounded-2xl shadow-sm">
+          <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-slate-900">Queue Clear</h3>
+          <p className="text-xs text-slate-700 mt-0.5">No tasks awaiting approval.</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -231,111 +212,91 @@ export const ITApprovalsPage: React.FC = () => {
             return (
               <div
                 key={reqId}
-                className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-6 space-y-5"
+                className="bg-white border border-slate-300 rounded-xl p-5 shadow-sm space-y-5"
               >
-                {/* Card Title & Meta */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-700/60 gap-2">
+                {/* Task Details Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 gap-2">
                   <div>
-                    <h2 className="text-lg font-bold text-slate-100">
+                    <h2 className="text-base font-bold text-slate-900">
                       {task.first_name} {task.last_name}
                     </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {task.department} • <span className="text-indigo-400">{task.role}</span>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      {task.department} • <span className="font-semibold text-blue-700">{task.role}</span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-3 text-xs font-mono">
-                    <span className="text-slate-400">ID: {reqId}</span>
+                  <div className="flex items-center gap-2.5 text-xs font-mono">
+                    <span className="text-slate-600 font-bold">{reqId}</span>
                     <span
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider ${
+                      className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
                         task.status === 'pending_approval'
-                          ? 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
+                          ? 'bg-amber-50 border-amber-300 text-amber-900'
                           : task.status === 'processing_rules'
-                          ? 'bg-blue-500/10 border border-blue-500/30 text-blue-300'
+                          ? 'bg-blue-50 border-blue-300 text-blue-900'
                           : task.status === 'failed'
-                          ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-                          : 'bg-slate-700 text-slate-300'
+                          ? 'bg-rose-50 border-rose-300 text-rose-900'
+                          : 'bg-slate-100 border-slate-300 text-slate-800'
                       }`}
                     >
-                      {task.status}
+                      {task.status.replace(/_/g, ' ')}
                     </span>
                   </div>
                 </div>
 
-                {/* State: Processing Rules (Agent is active) */}
                 {task.status === 'processing_rules' && (
-                  <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-xs text-indigo-300">
-                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
-                      <span>
-                        Agent is generating the plan and evaluating policies. The page will
-                        update automatically when the approval gate is ready...
-                      </span>
-                    </div>
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2 text-xs font-semibold text-blue-950">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-700 shrink-0" />
+                    <span>Evaluating rules and generating plan...</span>
                   </div>
                 )}
 
-                {/* State: Failed */}
                 {task.status === 'failed' && (
-                  <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-rose-300">
-                      <XCircle className="w-4 h-4" />
-                      <span>Plan generation failed in the background.</span>
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-rose-950">
+                      <XCircle className="w-4 h-4 text-rose-700" />
+                      <span>Generation failed.</span>
                     </div>
                     <button
                       onClick={() => handleGeneratePlan(reqId)}
                       disabled={isProcessing}
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-semibold"
+                      className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold"
                     >
-                      Retry Generation
+                      Retry
                     </button>
                   </div>
                 )}
 
-                {/* State: Requires Manual Intervention */}
-                {task.status === 'requires_manual_intervention' && (
-                  <div className="p-4 bg-rose-500/20 border border-rose-500/40 rounded-xl flex items-center gap-2 text-xs text-rose-300">
-                    <AlertCircle className="w-5 h-5 shrink-0" />
-                    <span>
-                      Maximum revision attempts reached (3/3). This request requires manual IT
-                      handling.
-                    </span>
-                  </div>
-                )}
-
-                {/* State: Intake Received, No Plan Yet */}
                 {task.status === 'pending_onboarding' && !hasPlan && (
-                  <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between">
-                    <span className="text-xs text-amber-300">
-                      Request intake received, but plan has not executed.
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-800">
+                      Plan generation pending.
                     </span>
                     <button
                       onClick={() => handleGeneratePlan(reqId)}
                       disabled={isProcessing}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold"
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold"
                     >
-                      Launch Agent Planner
+                      Generate Plan
                     </button>
                   </div>
                 )}
 
-                {/* State: Plan Generated & Available (HITL Approval Gate) */}
                 {hasPlan && plan && (
                   <div className="space-y-5">
-                    {/* Deterministic SQL Entitlements */}
+                    {/* Mandatory Licenses */}
                     <div className="space-y-2">
-                      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <Server className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Deterministic Entitlement Plan (SQL Rules)</span>
+                      <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Server className="w-3.5 h-3.5 text-blue-700" />
+                        <span>Mandatory Licenses</span>
                       </h3>
 
                       {plan.suggested_licenses.length === 0 ? (
-                        <p className="text-xs text-amber-400/80 bg-slate-900/50 p-3 rounded-lg border border-slate-800">
-                          No explicit assignment rules found for this role and department.
+                        <p className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded border border-slate-200">
+                          No mandatory rules found.
                         </p>
                       ) : (
-                        <div className="overflow-x-auto rounded-lg border border-slate-700/80">
+                        <div className="overflow-x-auto rounded-lg border border-slate-300">
                           <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-900/80 text-slate-400 border-b border-slate-700/80">
+                            <thead className="bg-slate-100 text-slate-800 border-b border-slate-300 font-bold uppercase tracking-wider text-[11px]">
                               <tr>
                                 <th className="p-2.5">Product</th>
                                 <th className="p-2.5">Vendor</th>
@@ -345,21 +306,23 @@ export const ITApprovalsPage: React.FC = () => {
                                 <th className="p-2.5">Approval</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-800 bg-slate-900/40 text-slate-200">
+                            <tbody className="divide-y divide-slate-200 bg-white text-slate-900 font-medium">
                               {plan.suggested_licenses.map((lic, idx) => (
-                                <tr key={idx} className="hover:bg-slate-800/30">
-                                  <td className="p-2.5 font-medium">
+                                <tr key={idx} className="hover:bg-slate-50">
+                                  <td className="p-2.5 font-bold text-slate-900">
                                     {lic.software_products?.name || 'Unknown'}
                                   </td>
-                                  <td className="p-2.5 text-slate-400">
+                                  <td className="p-2.5 text-slate-700">
                                     {lic.software_products?.vendor || 'N/A'}
                                   </td>
-                                  <td className="p-2.5 text-slate-400">
+                                  <td className="p-2.5 text-slate-700">
                                     {lic.software_products?.license_type || 'N/A'}
                                   </td>
-                                  <td className="p-2.5">{lic.access_level || 'standard'}</td>
-                                  <td className="p-2.5">{lic.is_mandatory ? '✅' : '❌'}</td>
-                                  <td className="p-2.5 text-slate-400">
+                                  <td className="p-2.5 capitalize">{lic.access_level || 'standard'}</td>
+                                  <td className="p-2.5 font-bold text-emerald-700">
+                                    {lic.is_mandatory ? 'Yes' : 'No'}
+                                  </td>
+                                  <td className="p-2.5 text-slate-700">
                                     {lic.requires_approval ? 'Yes' : 'No'}
                                   </td>
                                 </tr>
@@ -370,44 +333,40 @@ export const ITApprovalsPage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Discretionary AI Recommendations */}
+                    {/* Discretionary Licenses */}
                     {plan.discretionary_licenses?.length > 0 && (
                       <div className="space-y-2">
-                        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                          <FileCheck2 className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>AI Discretionary Recommendations (Based on Notes)</span>
+                        <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                          <FileCheck2 className="w-3.5 h-3.5 text-blue-700" />
+                          <span>Discretionary Recommendations</span>
                         </h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           {plan.discretionary_licenses.map((item) => {
-                            const isChecked = (selectedDiscretionary[reqId] || []).includes(
-                              item.product_id
-                            );
+                            const isChecked = (selectedDiscretionary[reqId] || []).includes(item.product_id);
                             return (
                               <label
                                 key={item.product_id}
                                 className={`p-3 rounded-lg border flex items-start gap-2.5 cursor-pointer text-xs transition-colors ${
                                   isChecked
-                                    ? 'bg-indigo-600/10 border-indigo-500/40 text-indigo-200'
-                                    : 'bg-slate-900/40 border-slate-800 text-slate-400'
+                                    ? 'bg-blue-50 border-blue-400 text-blue-950'
+                                    : 'bg-white border-slate-300 text-slate-800'
                                 }`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
-                                  onChange={() =>
-                                    handleToggleDiscretionary(reqId, item.product_id)
-                                  }
-                                  className="mt-0.5 rounded border-slate-700 bg-slate-900 text-indigo-600"
+                                  onChange={() => handleToggleDiscretionary(reqId, item.product_id)}
+                                  className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-600 w-4 h-4"
                                 />
                                 <div>
-                                  <div className="font-semibold text-slate-100">
+                                  <div className="font-bold text-slate-900 text-xs">
                                     {item.name}{' '}
-                                    <span className="font-mono text-[10px] text-slate-400">
+                                    <span className="font-mono text-[10px] text-slate-600">
                                       ({item.product_id})
                                     </span>
                                   </div>
-                                  <div className="text-[11px] text-slate-400 italic mt-0.5">
-                                    "{item.justification || 'No justification provided.'}"
+                                  <div className="text-[11px] text-slate-700 italic mt-0.5">
+                                    "{item.justification || 'No justification'}"
                                   </div>
                                 </div>
                               </label>
@@ -417,46 +376,40 @@ export const ITApprovalsPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Hardware & Policy Citations Split */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Hardware */}
-                      <div className="p-3.5 rounded-xl border border-slate-700/60 bg-slate-900/40 space-y-2">
-                        <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                          <Laptop className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Suggested Hardware</span>
+                    {/* Hardware & Policies */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg border border-slate-300 bg-slate-50 space-y-1.5">
+                        <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1 uppercase tracking-wider">
+                          <Laptop className="w-3.5 h-3.5 text-blue-700" />
+                          <span>Hardware</span>
                         </h4>
-                        <pre className="text-[11px] font-mono text-slate-400 overflow-x-auto p-2 bg-slate-950/50 rounded">
+                        <pre className="text-xs font-mono text-slate-900 overflow-x-auto p-2 bg-white border border-slate-200 rounded">
                           {JSON.stringify(plan.suggested_hardware, null, 2)}
                         </pre>
                       </div>
 
-                      {/* Policy Citations */}
-                      <div className="p-3.5 rounded-xl border border-slate-700/60 bg-slate-900/40 space-y-2">
-                        <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                          <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Policy Citations & Flags</span>
+                      <div className="p-3 rounded-lg border border-slate-300 bg-slate-50 space-y-1.5">
+                        <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1 uppercase tracking-wider">
+                          <ShieldAlert className="w-3.5 h-3.5 text-blue-700" />
+                          <span>Policy Citations</span>
                         </h4>
-                        <pre className="text-[11px] font-mono text-slate-400 overflow-x-auto p-2 bg-slate-950/50 rounded">
+                        <pre className="text-xs font-mono text-slate-900 overflow-x-auto p-2 bg-white border border-slate-200 rounded">
                           {JSON.stringify(plan.policy_citations, null, 2)}
                         </pre>
                       </div>
                     </div>
 
-                    {/* HITL Review Gateway */}
+                    {/* Action Decision */}
                     {task.status === 'pending_approval' && (
-                      <div className="pt-4 border-t border-slate-700/60 space-y-3">
-                        <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                          ⚖️ IT Review Decision
-                        </h4>
-
+                      <div className="pt-3 border-t border-slate-200 space-y-2.5">
                         <textarea
                           rows={2}
-                          placeholder="Revision notes/feedback (e.g., Provide 32GB RAM model instead)..."
+                          placeholder="Revision feedback or manual override details..."
                           value={reviewNotes[reqId] || ''}
                           onChange={(e) =>
                             setReviewNotes({ ...reviewNotes, [reqId]: e.target.value })
                           }
-                          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 resize-none"
                         />
 
                         <div className="flex items-center gap-3">
@@ -464,18 +417,18 @@ export const ITApprovalsPage: React.FC = () => {
                             type="button"
                             onClick={() => handleReviewAction(reqId, 'regenerate')}
                             disabled={isProcessing}
-                            className="flex-1 py-2 px-3 rounded-lg border border-slate-700 hover:bg-slate-700 text-xs font-semibold text-slate-300 disabled:opacity-50 transition-colors"
+                            className="flex-1 py-2 px-3 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs font-bold text-slate-800 disabled:opacity-50 transition-colors"
                           >
-                            {isProcessing ? 'Processing...' : '🔄 Regenerate Plan'}
+                            {isProcessing ? 'Processing...' : 'Request Revision'}
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleReviewAction(reqId, 'approve')}
                             disabled={isProcessing}
-                            className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 disabled:opacity-50 transition-colors"
+                            className="flex-1 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-50 transition-colors"
                           >
-                            {isProcessing ? 'Executing...' : '🚀 Approve & Provision'}
+                            {isProcessing ? 'Executing...' : 'Approve & Provision'}
                           </button>
                         </div>
                       </div>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { FileSignature, CreditCard, HeartPulse, Layers, AlertTriangle } from 'lucide-react';
 import { DocumentDropzone } from './DocumentDropzone';
 import type { DocumentType, ExtractionResponse } from '../types/extraction';
-import {fetchWithAuth} from '../lib/api';
+import { fetchWithAuth } from '../lib/api';
 
 interface DocumentIngestionProps {
   apiBaseUrl: string;
@@ -90,20 +90,20 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-slate-100">1. Document Ingestion Dropzones</h2>
-          <p className="text-xs text-slate-400">
-            Upload candidate files to auto-populate identity, contract, and compliance details.
-          </p>
-        </div>
+      <div className="border-b border-slate-300 pb-3">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-900">
+          1. Document Upload & Extraction
+        </h2>
+        <p className="text-xs text-slate-700 mt-0.5">
+          Attach identity, contract, and medical documents to populate candidate records automatically.
+        </p>
       </div>
 
       {alerts.length > 0 && (
-        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-1">
+        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1">
           {alerts.map((alert, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-xs text-amber-300">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
+            <div key={idx} className="flex items-center gap-2 text-xs font-semibold text-amber-950">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-700" />
               <span>{alert}</span>
             </div>
           ))}
@@ -115,7 +115,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <DocumentDropzone
           docType="contract"
           title="Employment Contract"
-          description="Extracts role, manager, dates & address"
+          description="Role, manager, dates & address"
           icon={FileSignature}
           file={files.contract}
           onFileSelect={(file) => handleFileChange('contract', file)}
@@ -127,8 +127,8 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
 
         <DocumentDropzone
           docType="national_id"
-          title="National Photo ID"
-          description="Extracts legal name & CNP"
+          title="National ID Card"
+          description="Legal full name & CNP"
           icon={CreditCard}
           file={files.national_id}
           onFileSelect={(file) => handleFileChange('national_id', file)}
@@ -141,7 +141,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <DocumentDropzone
           docType="medical_clearance"
           title="Medical Clearance"
-          description="Validates fitness for work & exam date"
+          description="Fitness verification & examination date"
           icon={HeartPulse}
           file={files.medical_clearance}
           onFileSelect={(file) => handleFileChange('medical_clearance', file)}
@@ -150,6 +150,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
           isSuccess={successMap.medical_clearance}
           disabled={isAnyScanning}
         />
+
         <button
           type="button"
           onClick={() => {
@@ -157,10 +158,10 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
             scanBatch(queue);
           }}
           disabled={activeFilesCount === 0 || isAnyScanning}
-          className="col-span-1 md:col-span-3 w-full flex items-center justify-center gap-2 py-3 px-4 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+          className="col-span-1 md:col-span-3 w-full flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
         >
-          <Layers className="w-4 h-4 text-indigo-400" />
-          Scan All Uploaded ({activeFilesCount} ready)
+          <Layers className="w-4 h-4 text-white" />
+          <span>Extract All Uploaded Files ({activeFilesCount} Ready)</span>
         </button>
       </div>
     </div>
