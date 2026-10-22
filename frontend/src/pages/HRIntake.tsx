@@ -29,6 +29,13 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+const generateRunId = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `run-${crypto.randomUUID().substring(0, 12)}`;
+  }
+  return `run-${Math.random().toString(36).substring(2, 14)}`;
+};
+
 const getInitialFormData = () => ({
   first_name: '',
   last_name: '',
@@ -56,6 +63,7 @@ const INITIAL_SCANNED_DOCS = {
 
 export const HrIntakePage: React.FC = () => {
   const [ingestionKey, setIngestionKey] = useState<number>(0);
+  const [onboardingRunId, setOnboardingRunId] = useState<string>(generateRunId);
   const [, setScannedDocuments] = useState<{
     contract: Record<string, any>;
     national_id: Record<string, any>;
@@ -148,6 +156,7 @@ export const HrIntakePage: React.FC = () => {
     }
 
     const payload = {
+      onboarding_run_id: onboardingRunId,
       first_name: formatName(formData.first_name),
       last_name: formatName(formData.last_name),
       national_id: formData.national_id.trim() || null,
@@ -186,6 +195,7 @@ export const HrIntakePage: React.FC = () => {
       setScannedDocuments(INITIAL_SCANNED_DOCS);
       setValidationAlerts([]);
       setIngestionKey((prev) => prev + 1);
+      setOnboardingRunId(generateRunId());
 
     } catch (err: any) {
       setSubmitResponse({
@@ -215,6 +225,7 @@ export const HrIntakePage: React.FC = () => {
       <DocumentIngestion
         key={ingestionKey}
         apiBaseUrl={API_BASE_URL}
+        onboardingRunId={onboardingRunId}
         onExtractionSuccess={handleExtractionSuccess}
       />
 

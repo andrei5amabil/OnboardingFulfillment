@@ -1,23 +1,20 @@
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from typing import Optional, Union
+from typing import Optional
 import time
 
 from src.extraction.preprocessing import DocumentPreprocessor
 from src.extraction.schemas import (
-    ContractExtractionSchema,
     DocumentType,
     ExtractionMetrics,
     ExtractionResponse,
-    MedicalClearanceExtractionSchema,
-    NationalIDExtractionSchema,
 )
 from src.extraction.parse_ocr import TrackAExtractor
 from src.extraction.vllm_extract import TrackBExtractor
 from src.extraction.llm_formatter import TrackCJudge
 
 MODEL_SKIP_THRESHOLD = 200
-
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -45,7 +42,7 @@ class DocumentExtractionService:
             filename=filename,
         )
 
-        # 2. Check for Rich Digital Text Layer (Fast-Path)
+        # 2. Fast-Path Check
         total_digital_chars = sum(len(p.text.strip()) for p in pages)
         is_digital_document = total_digital_chars >= MODEL_SKIP_THRESHOLD
 
@@ -54,17 +51,19 @@ class DocumentExtractionService:
         vision_tokens = {"prompt_tokens": 0, "completion_tokens": 0}
 
         if is_digital_document:
-            logger.info(
-                f"Fast-path triggered for '{filename}': {total_digital_chars} digital chars detected. "
-                "Skipping Vision LLM (Track B)."
-            )
+            logger.info(f"Fast-path triggered for '{filename}'. Skipping Vision LLM.")
             track_a_text = TrackAExtractor.extract(pages)
-            track_b_text = "[DIGITAL DOCUMENT: Track B vision bypassed to optimize latency]"
+            track_b_text = "[DIGITAL DOCUMENT: Track B vision bypassed]"
         else:
-            logger.info(f"Visual document detected for '{filename}'. Running Track A (OCR) & Track B (Vision).")
+            logger.info(f"Visual document detected for '{filename}'. Running Track A & Track B.")
+
+            # Propagate the active OpenTelemetry context into the worker thread
+            ctx = contextvars.copy_context()
+
             with ThreadPoolExecutor(max_workers=2) as executor:
                 future_a = executor.submit(TrackAExtractor.extract, pages)
                 future_b = executor.submit(
+                    ctx.run,
                     TrackBExtractor.extract,
                     pages=pages,
                     doc_type=doc_type,
@@ -73,7 +72,7 @@ class DocumentExtractionService:
                 track_a_text = future_a.result()
                 track_b_text, vision_tokens = future_b.result()
 
-        # 3. Track C: Judge LLM Arbitration
+        # 3. Track C: Judge LLM Arbitration (runs on request thread, inherits context automatically)
         validated_data, judge_tokens = TrackCJudge.arbitrate(
             doc_type=doc_type,
             track_a_text=track_a_text,
@@ -81,7 +80,7 @@ class DocumentExtractionService:
             model=judge_model,
         )
 
-        # 4. Confidence / Sanity checks
+        # 4. Confidence checks
         flags = []
         if doc_type == DocumentType.MEDICAL_CLEARANCE:
             if not validated_data.medical_clearance_status:
@@ -109,11 +108,7 @@ class DocumentExtractionService:
             fast_path_used=is_digital_document,
         )
 
-        logger.info(
-            f"🏁 [PIPELINE FINISHED] Completed in {total_elapsed:.2f}s | "
-            f"Tokens: {metrics.tokens_total} (P: {metrics.tokens_prompt}, C: {metrics.tokens_completion}) | "
-            f"FastPath: {is_digital_document} | Warnings: {flags}"
-        )
+        logger.info(f"🏁 [PIPELINE FINISHED] Completed in {total_elapsed:.2f}s | FastPath: {is_digital_document}")
         logger.info("=" * 70 + "\n")
 
         return ExtractionResponse(

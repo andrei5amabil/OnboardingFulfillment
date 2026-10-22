@@ -6,11 +6,13 @@ import { fetchWithAuth } from '../lib/api';
 
 interface DocumentIngestionProps {
   apiBaseUrl: string;
+  onboardingRunId: string;
   onExtractionSuccess: (docType: DocumentType, payload: ExtractionResponse) => void;
 }
 
 export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
   apiBaseUrl,
+  onboardingRunId,
   onExtractionSuccess,
 }) => {
   const [files, setFiles] = useState<Record<DocumentType, File | null>>({
@@ -45,6 +47,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
     const formData = new FormData();
     formData.append('file', file);
     formData.append('document_type', docType);
+    formData.append('onboarding_run_id', onboardingRunId);
 
     setScanningMap((prev) => ({ ...prev, [docType]: true }));
 
