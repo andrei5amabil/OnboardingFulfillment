@@ -73,11 +73,12 @@ def get_current_user(
 
 class RequireRoles:
     """Dependency factory enforcing specific roles. 'admin' always has full access."""
-    def __init__(self, allowed_roles: List[str]):
+    def __init__(self, allowed_roles: List[str], allow_admin: bool = True):
         self.allowed_roles = allowed_roles
+        self.allow_admin = allow_admin
 
     def __call__(self, user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        if user.role == "admin" or user.role in self.allowed_roles:
+        if (self.allow_admin and user.role == "admin") or user.role in self.allowed_roles:
             return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -22,6 +22,12 @@ const AppShell: React.FC = () => {
     }
   }, [role]);
 
+  const handleTabChange = (tab: NavTab) => {
+    if (role === 'new_hire' && tab !== 'portal') return;
+    if (role !== 'new_hire' && tab === 'portal') return;
+    setCurrentTab(tab);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">
@@ -36,13 +42,13 @@ const AppShell: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white antialiased">
-      <Navbar currentTab={currentTab} onTabChange={setCurrentTab} />
+      <Navbar currentTab={currentTab} onTabChange={handleTabChange} />
 
       <main className="flex-1 pb-16">
         {currentTab === 'hr' && (role === 'admin' || role === 'hr_manager') && <HrIntakePage />}
         {currentTab === 'it' && (role === 'admin' || role === 'it_manager') && <ITApprovalsPage />}
         {currentTab === 'kpi' && (role === 'admin' || role === 'hr_manager' || role === 'it_manager') && <KPIDashboard />}
-        {currentTab === 'portal' && (role === 'admin' || role === 'new_hire') && <NewHirePortal />}
+        {currentTab === 'portal' && role === 'new_hire' && <NewHirePortal />}
       </main>
     </div>
   );

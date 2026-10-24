@@ -663,7 +663,7 @@ def get_onboarding_kpis(user: CurrentUser = Depends(RequireRoles(["hr_manager", 
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/portal/me")
-def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire"]))):
+def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire"], allow_admin=False))):
     if not user.employee_id:
         return {
             "status": "pending_linking",

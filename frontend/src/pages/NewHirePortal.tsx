@@ -153,9 +153,6 @@ export const NewHirePortal: React.FC = () => {
             Workstation and tool authorizations are configured.
           </p>
         </div>
-        <span className="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold">
-          Active
-        </span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">

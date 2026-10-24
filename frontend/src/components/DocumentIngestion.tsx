@@ -97,9 +97,6 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <h2 className="text-sm font-bold uppercase tracking-wider text-slate-900">
           1. Document Upload & Extraction
         </h2>
-        <p className="text-xs text-slate-700 mt-0.5">
-          Attach identity, contract, and medical documents to populate candidate records automatically.
-        </p>
       </div>
 
       {alerts.length > 0 && (
@@ -118,7 +115,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <DocumentDropzone
           docType="contract"
           title="Employment Contract"
-          description="Role, manager, dates & address"
+          description=""
           icon={FileSignature}
           file={files.contract}
           onFileSelect={(file) => handleFileChange('contract', file)}
@@ -131,7 +128,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <DocumentDropzone
           docType="national_id"
           title="National ID Card"
-          description="Legal full name & CNP"
+          description=""
           icon={CreditCard}
           file={files.national_id}
           onFileSelect={(file) => handleFileChange('national_id', file)}
@@ -144,7 +141,7 @@ export const DocumentIngestion: React.FC<DocumentIngestionProps> = ({
         <DocumentDropzone
           docType="medical_clearance"
           title="Medical Clearance"
-          description="Fitness verification & examination date"
+          description=""
           icon={HeartPulse}
           file={files.medical_clearance}
           onFileSelect={(file) => handleFileChange('medical_clearance', file)}

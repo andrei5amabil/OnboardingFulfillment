@@ -75,7 +75,7 @@ export const KPIDashboard: React.FC = () => {
           <div className="text-3xl font-black text-slate-900 font-mono">
             {data?.avg_tokens_per_employee.toLocaleString()}
           </div>
-          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-bold text-slate-700 font-mono">
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-bold text-slate-900 font-mono">
             <span>Prompt: {data?.token_usage_breakdown.prompt.toLocaleString()}</span>
             <span>Completion: {data?.token_usage_breakdown.completion.toLocaleString()}</span>
           </div>
@@ -91,7 +91,7 @@ export const KPIDashboard: React.FC = () => {
           <div className="text-3xl font-black text-slate-900 font-mono">
             {data?.avg_agent_execution_seconds}s
           </div>
-          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-700">
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-900">
             <span>Total Lead Time:</span>
             <span className="font-mono font-bold text-slate-900">{data?.avg_total_lead_time_seconds}s</span>
           </div>
@@ -100,16 +100,16 @@ export const KPIDashboard: React.FC = () => {
         <div className="bg-white border border-slate-300 rounded-xl p-5 space-y-3 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Approval Rate</span>
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <div className="p-2 rounded-lg bg-emerald-50 text-blue-700 border border-blue-200">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-black text-emerald-700 font-mono">
+          <div className="text-3xl font-black text-slate-900 font-mono">
             {data?.first_pass_approval_rate}%
           </div>
-          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-700">
+          <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-semibold text-slate-900">
             <span>Escalation Rate:</span>
-            <span className="font-mono font-bold text-rose-700">{data?.escalation_rate}%</span>
+            <span className="font-mono font-bold text-slate-900">{data?.escalation_rate}%</span>
           </div>
         </div>
       </div>
@@ -123,7 +123,7 @@ export const KPIDashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
             <div className="text-xs font-bold text-slate-700 uppercase">Legacy Method</div>
-            <div className="text-lg font-black text-slate-900 mt-1">3–5 Business Days</div>
+            <div className="text-lg font-black text-slate-900 mt-1">3 - 5 Business Days</div>
           </div>
           <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
             <div className="text-xs font-bold text-blue-700 uppercase">Automated Pipeline</div>

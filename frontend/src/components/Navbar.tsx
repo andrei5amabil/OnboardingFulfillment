@@ -43,7 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
             <div className="p-1.5 bg-blue-600 rounded-lg text-white shadow-sm">
               <ShieldCheck className="w-4 h-4" />
             </div>
-            <span>AutoOnboard</span>
+            <span>AutOnboard</span>
           </div>
 
           <nav className="flex items-center gap-1">
@@ -68,7 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
               </button>
             )}
 
-            {(role === 'admin' || role === 'new_hire') && (
+            {( role === 'new_hire') && (
               <button onClick={() => onTabChange('portal')} className={navButtonClass('portal')}>
                 <UserCheck className="w-3.5 h-3.5" />
                 <span>New Hire Hub</span>
