@@ -18,6 +18,7 @@ from datetime import date, datetime, timezone
 import json
 import ollama
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
+from src.rag.chat import generate_portal_chat_response
 import logging
 from src.agent.graph import onboarding_flow
 from langgraph.types import Command
@@ -111,6 +112,14 @@ class KPIResponse(BaseModel):
     first_pass_approval_rate: float
     escalation_rate: float
     recent_runs: list[dict]
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
 
 def kickoff_agent_workflow(request_id: str, onboarding_run_id: Optional[str] = None, *args, **kwargs):
     """Initializes and runs the graph until the approval gate interrupt."""
@@ -726,3 +735,36 @@ def get_new_hire_portal_data(user: CurrentUser = Depends(RequireRoles(["new_hire
         "hardware": hardware_specs,
         "licenses": licenses_res.data or [],
     }
+
+@app.post("/portal/chat")
+def portal_chat(
+    payload: ChatRequest,
+    user: CurrentUser = Depends(RequireRoles(["new_hire"], allow_admin=False)) #
+):
+    emp_res = supabase.table("employees").select("*").eq("employee_id", user.employee_id).execute() #[cite: 16]
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Employee record not found.") #[cite: 16]
+    
+    emp = emp_res.data[0] #[cite: 16]
+    licenses_res = (
+        supabase.table("license_assignments") #[cite: 16]
+        .select("software_products(name, license_type)") #[cite: 16]
+        .eq("employee_id", user.employee_id) #[cite: 16]
+        .execute()
+    )
+    
+    context = {
+        "role": emp.get("role"), #[cite: 16]
+        "department": emp.get("department"), #[cite: 16]
+        "work_location": emp.get("work_location"), #[cite: 16]
+        "licenses": licenses_res.data or [], #[cite: 16]
+        "hardware": {"laptop": "Standard Corporate Issue"}
+    }
+
+    bot_reply = generate_portal_chat_response(
+        employee_context=context,
+        query=payload.message,
+        chat_history=[m.model_dump() for m in payload.history]
+    )
+
+    return {"reply": bot_reply}

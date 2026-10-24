@@ -1,18 +1,17 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchWithAuth } from '../lib/api';
 import {
-  Laptop,
   Loader2,
   ExternalLink,
   BookOpen,
-  Building2,
-  Calendar,
-  MapPin,
   CheckCircle2,
-  Sparkles,
   Boxes,
   Circle,
   Cpu,
+  MessageSquare,
+  Send,
+  X,
+  Bot
 } from 'lucide-react';
 
 interface SoftwareProduct {
@@ -60,6 +59,40 @@ export const NewHirePortal: React.FC = () => {
   const [data, setData] = useState<PortalData | null>(null);
   const [loading, setLoading] = useState(true);
   const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
+    { role: 'assistant', content: 'Hello! I can answer questions about your hardware, assigned software, and company policies.' }
+  ]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isChatLoading) return;
+
+    const userMsg = chatInput.trim();
+    const nextHistory = [...chatMessages, { role: 'user' as const, content: userMsg }];
+    setChatMessages(nextHistory);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    try {
+      const res = await fetchWithAuth('/portal/chat', { //[cite: 5, 14]
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMsg, history: nextHistory.slice(-4) })
+      });
+      const data = await res.json();
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (err) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, I ran into an issue retrieving that policy. Please try again.' }
+      ]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchWithAuth('/portal/me')
@@ -354,6 +387,70 @@ export const NewHirePortal: React.FC = () => {
           </div>
         )}
       </div>
+      {/* Floating Chat Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        {!chatOpen && (
+          <button
+            onClick={() => setChatOpen(true)}
+            className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg text-xs font-bold transition-transform hover:scale-105"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Ask Assistant</span>
+          </button>
+        )}
+      </div>
+
+      {/* Slide-over Chat Box */}
+      {chatOpen && (
+        <div className="fixed bottom-6 right-6 w-96 h-[500px] bg-white border border-slate-300 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden">
+          {/* Header */}
+          <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-400" />
+              <span className="text-xs font-bold">Policy & Onboarding Assistant</span>
+            </div>
+            <button onClick={() => setChatOpen(false)} className="text-slate-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Message Feed */}
+          <div className="flex-1 p-3 overflow-y-auto space-y-2.5 text-xs">
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-2.5 rounded-xl ${
+                  msg.role === 'user' 
+                    ? 'bg-blue-600 text-white rounded-br-none' 
+                    : 'bg-slate-100 text-slate-900 rounded-bl-none border border-slate-200'
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {isChatLoading && (
+              <div className="text-slate-400 text-xs italic animate-pulse">Checking policies...</div>
+            )}
+          </div>
+
+          {/* Input Form */}
+          <form onSubmit={handleSendMessage} className="p-2 border-t border-slate-200 flex gap-2 bg-slate-50">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Ask about tools, VPN, laptops..."
+              className="flex-1 text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-600"
+            />
+            <button
+              type="submit"
+              disabled={isChatLoading || !chatInput.trim()}
+              className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
