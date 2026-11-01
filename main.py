@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FastAPI + Supabase Setup", lifespan=lifespan)
 
+@app.middleware("http")
+async def strip_api_prefix(request, call_next):
+    if request.scope["path"].startswith("/api/"):
+        request.scope["path"] = request.scope["path"][4:]
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -49,6 +55,7 @@ app.add_middleware(
         "http://100.74.74.87:5173",
         "http://100.126.203.120:5173",
     ],
+    allow_origin_regex=r"https://.*\.(trycloudflare\.com|ts\.net)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
