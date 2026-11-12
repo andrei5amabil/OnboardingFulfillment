@@ -17,3 +17,5 @@ chroma_db/
 mock_documents/
 *.sqlite3
 *.pkl
+
+todo.txt
