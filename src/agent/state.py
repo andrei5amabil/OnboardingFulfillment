@@ -28,3 +28,6 @@ class OnboardingState(TypedDict):
     work_email: Optional[str]
     provisioning_error: Optional[str]
     current_run_id: Optional[int]
+    jira_ticket_id: Optional[str]
+    jira_ticket_url: Optional[str]
+    jira_subtask_id: Optional[str]

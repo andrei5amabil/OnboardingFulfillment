@@ -1,7 +1,10 @@
 import os
 from urllib import response
 import uuid
-from typing import Literal, Optional
+import hashlib
+import hmac
+import threading
+from typing import Any, Literal, Optional
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -10,7 +13,7 @@ load_dotenv()
 # 2. Initialize the AI Observability SDK early at startup
 from src.observability import workflow, span, shutdown_observability, suppress_tracing
 
-from fastapi import FastAPI, HTTPException, status, BackgroundTasks, Body, File, Form, UploadFile, Depends, Response
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks, File, Form, Request as FastAPIRequest, UploadFile, Depends, Response
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from supabase import create_client, Client
 from postgrest import APIError
@@ -23,6 +26,14 @@ import logging
 from src.agent.graph import onboarding_flow
 from langgraph.types import Command
 from src.db import supabase
+from src.integrations.jira.client import JiraError, adf_to_text, jira_client
+from src.integrations.jira.format import build_review_comment
+from src.integrations.jira.workflow import (
+    STATUS_APPROVED,
+    STATUS_NEEDS_REVISION,
+    is_service_account,
+    map_status_to_action,
+)
 import traceback
 from src.extraction.schemas import DocumentType, ExtractionResponse
 from src.extraction.service import DocumentExtractionService
@@ -102,6 +113,9 @@ class DB_Request(BaseModel):
     hr_manager_id: str
     notes: Optional[str] = None
     status: str
+    jira_ticket_id: Optional[str] = None
+    jira_ticket_url: Optional[str] = None
+    jira_subtask_id: Optional[str] = None
     workflow_runs: Optional[list[dict]] = []
 
 class ReviewPayload(BaseModel):
@@ -163,6 +177,9 @@ def kickoff_agent_workflow(request_id: str, onboarding_run_id: Optional[str] = N
         "work_email": None,
         "provisioning_error": None,
         "current_run_id": None,
+        "jira_ticket_id": None,
+        "jira_ticket_url": None,
+        "jira_subtask_id": None,
     }
     try:
         # Outer boundary ensures extraction and agent generation join the same trace
@@ -257,6 +274,26 @@ def check_sb_connection():
                 "raw_response": error_str
             }
         raise HTTPException(status_code=500, detail=f"Could not reach local Supabase instance: {error_str}")
+
+@app.get("/health/jira")
+def check_jira_connection():
+    """Verify Jira configuration and API credentials (read-only)."""
+    if not jira_client.is_configured:
+        return {
+            "status": "not_configured",
+            "message": "Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN and JIRA_PROJECT_KEY.",
+        }
+
+    try:
+        me = jira_client.get_myself()
+        return {
+            "status": "connected",
+            "account": me.get("emailAddress") or me.get("displayName"),
+            "account_id": me.get("accountId"),
+            "project_key": jira_client.config.project_key,
+        }
+    except JiraError as exc:
+        raise HTTPException(status_code=502, detail=f"Jira connection failed: {exc}")
 
 @app.post(
     "/onboarding/extract-document",
@@ -469,165 +506,439 @@ def resume_regeneration_workflow(
             {"status": "failed"}
         ).eq("request_id", request_id).execute()
     
-@app.post("/onboarding/requests/{request_id}/review")
-def review_onboarding_plan(
-    request_id: str, 
-    payload: ReviewPayload,
-    background_tasks: BackgroundTasks,
-    user: CurrentUser = Depends(RequireRoles(["it_manager"]))
-):
-    """Executes synchronous atomic provisioning on approval, or queues background regeneration."""
-    now_iso = datetime.now(timezone.utc).isoformat()
-    reviewer = user.employee_id or payload.reviewed_by or "IT_ADMIN"
+def _sync_jira_review(request_id: str, action: str, note: str, reviewer: str) -> None:
+    """Mirror a portal review decision onto the parent Jira ticket."""
+    if not jira_client.is_configured:
+        return
 
+    try:
+        res = (
+            supabase.table("onboarding_requests")
+            .select("*")
+            .eq("request_id", request_id)
+            .single()
+            .execute()
+        )
+        ticket_id = (res.data or {}).get("jira_ticket_id")
+        if not ticket_id:
+            logger.info("No Jira ticket linked to %s; skipping review sync.", request_id)
+            return
+
+        jira_client.add_comment(
+            ticket_id,
+            build_review_comment(action, reviewer, note),
+        )
+
+        target_status = STATUS_APPROVED if action == "approve" else STATUS_NEEDS_REVISION
+        if not jira_client.ensure_status(ticket_id, target_status):
+            logger.warning(
+                "Jira ticket %s could not be moved to '%s'.",
+                ticket_id,
+                target_status,
+            )
+    except Exception as exc:
+        # Jira must never block the onboarding workflow itself.
+        logger.error("Jira review sync failed for %s: %s", request_id, exc, exc_info=True)
+
+
+def _apply_review_decision(
+    request_id: str,
+    action: str,
+    note: str = "",
+    reviewer: str = "IT_ADMIN",
+    approved_discretionary_ids: Optional[list[str]] = None,
+    background_tasks: Optional[BackgroundTasks] = None,
+    sync_jira: bool = True,
+) -> dict[str, Any]:
+    """Shared review handler used by the portal endpoint and the Jira webhook."""
+    now_iso = datetime.now(timezone.utc).isoformat()
     config = {"configurable": {"thread_id": request_id}}
     state_snapshot = onboarding_flow.get_state(config)
 
     req_res = supabase.table("onboarding_requests").select("*").eq("request_id", request_id).single().execute()
     if not req_res.data:
         raise HTTPException(status_code=404, detail="Request not found")
-    
-    onboarding_run_id = req_res.data.get("onboarding_run_id") or request_id
+
+    request_row = req_res.data
+    onboarding_run_id = request_row.get("onboarding_run_id") or request_id
+
+    latest_run = (
+        supabase.table("workflow_runs")
+        .select("*")
+        .eq("request_id", request_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    run_data = latest_run.data[0] if latest_run.data else {}
+
+    if run_data.get("run_id"):
+        supabase.table("workflow_runs").update({
+            "review_action": action,
+            "it_notes": note or "",
+            "reviewed_by": reviewer,
+            "reviewed_at": now_iso,
+        }).eq("run_id", run_data["run_id"]).execute()
+
+    # A Jira approval carries no checkbox selection, so approve the plan as
+    # presented (all proposed discretionary licenses) - matching the portal's
+    # default "everything checked" behaviour.
+    if approved_discretionary_ids is None:
+        approved_discretionary_ids = [
+            item.get("product_id")
+            for item in (run_data.get("discretionary_licenses") or [])
+            if item.get("product_id")
+        ]
 
     resume_data = {
-        "action": payload.action,
-        "note": payload.note or "",
+        "action": action,
+        "note": note or "",
         "reviewed_by": reviewer,
-        "approved_discretionary_ids": payload.approved_discretionary_ids,
+        "approved_discretionary_ids": approved_discretionary_ids,
     }
 
-    try:
-        latest_run = (
-            supabase.table("workflow_runs")
-            .select("run_id")
-            .eq("request_id", request_id)
-            .order("created_at", desc=True)
-            .limit(1)
+    if sync_jira:
+        _sync_jira_review(request_id, action, note, reviewer)
+
+    reconstructed_state = None
+    if not state_snapshot.tasks:
+        catalog_res = (
+            supabase.table("software_products")
+            .select("name, vendor, license_type, requires_approval, product_id")
             .execute()
         )
-        if latest_run.data:
-            current_run_id = latest_run.data[0]["run_id"]
-            supabase.table("workflow_runs").update({
-                "review_action": payload.action,
-                "it_notes": payload.note or "",
-                "reviewed_by": reviewer,
-                "reviewed_at": now_iso,
-            }).eq("run_id", current_run_id).execute()
+        software_catalog = catalog_res.data or []
+        policy_blob = (run_data.get("policy_citations") or [{}])[0] or {}
 
-        reconstructed_state = None
-        if not state_snapshot.tasks:
-            run_res = (
-                supabase.table("workflow_runs")
-                .select("*")
-                .eq("request_id", request_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            run_data = run_res.data[0] if run_res.data else {}
+        reconstructed_state = {
+            "request_id": request_id,
+            "employee_id": request_row["employee_id"],
+            "candidate_data": request_row,
+            "sql_rules": run_data.get("suggested_licenses", []),
+            "suggested_licenses": run_data.get("suggested_licenses", []),
+            "discretionary_licenses": run_data.get("discretionary_licenses", []),
+            "software_catalog": software_catalog,
+            "approved_discretionary_ids": approved_discretionary_ids,
+            "suggested_hardware": run_data.get("suggested_hardware", {}),
+            "policy_tags": policy_blob.get("tags", []),
+            "flagged_exceptions": policy_blob.get("flagged_exceptions", []),
+            "citations": [
+                {
+                    "policy_code": c.get("code"),
+                    "section_title": c.get("section"),
+                }
+                for c in policy_blob.get("raw_citations", [])
+            ],
+            "attempt_count": run_data.get("attempt_number", 1),
+            "it_feedback": [note] if note else [],
+            "review_action": action,
+            "reviewed_by": reviewer,
+            "is_approved": (action == "approve"),
+            "status": "approved" if action == "approve" else "revision_requested",
+            "tokens_prompt": run_data.get("tokens_prompt", 0),
+            "tokens_completion": run_data.get("tokens_completion", 0),
+            "tokens_total": run_data.get("tokens_total", 0),
+            "work_email": None,
+            "provisioning_error": None,
+            "current_run_id": run_data.get("run_id"),
+            "jira_ticket_id": request_row.get("jira_ticket_id"),
+            "jira_ticket_url": request_row.get("jira_ticket_url"),
+            "jira_subtask_id": request_row.get("jira_subtask_id"),
+        }
 
-            catalog_res = (
-                supabase.table("software_products")
-                .select("name, vendor, license_type, requires_approval, product_id")
-                .execute()
-            )
-            software_catalog = catalog_res.data or []
+    if action == "regenerate":
+        supabase.table("onboarding_requests").update(
+            {"status": "processing_rules"}
+        ).eq("request_id", request_id).execute()
 
-            reconstructed_state = {
-                "request_id": request_id,
-                "employee_id": req_res.data["employee_id"],
-                "candidate_data": req_res.data,
-                "sql_rules": run_data.get("suggested_licenses", []),
-                "suggested_licenses": run_data.get("suggested_licenses", []),
-                "discretionary_licenses": run_data.get("discretionary_licenses", []),
-                "software_catalog": software_catalog,
-                "approved_discretionary_ids": payload.approved_discretionary_ids,
-                "suggested_hardware": run_data.get("suggested_hardware", {}),
-                "policy_tags": run_data.get("policy_citations", [{}])[0].get("tags", []) if run_data.get("policy_citations") else [],
-                "flagged_exceptions": run_data.get("policy_citations", [{}])[0].get("flagged_exceptions", []) if run_data.get("policy_citations") else [],
-                "citations": [],
-                "attempt_count": run_data.get("attempt_number", 1),
-                "it_feedback": [payload.note] if payload.note else [],
-                "review_action": payload.action,
-                "reviewed_by": reviewer,
-                "is_approved": (payload.action == "approve"),
-                "status": "approved" if payload.action == "approve" else "revision_requested",
-                "tokens_prompt": run_data.get("tokens_prompt", 0),
-                "tokens_completion": run_data.get("tokens_completion", 0),
-                "tokens_total": run_data.get("tokens_total", 0),
-                "work_email": None,
-                "provisioning_error": None,
-                "current_run_id": run_data.get("run_id"),
-            }
-
-        if payload.action == "regenerate":
-            supabase.table("onboarding_requests").update(
-                {"status": "processing_rules"}
-            ).eq("request_id", request_id).execute()
-
+        if background_tasks is not None:
             background_tasks.add_task(
-                resume_regeneration_workflow, 
-                request_id, 
-                resume_data, 
+                resume_regeneration_workflow,
+                request_id,
+                resume_data,
+                reconstructed_state,
+                onboarding_run_id,
+            )
+        else:
+            resume_regeneration_workflow(
+                request_id,
+                resume_data,
                 reconstructed_state,
                 onboarding_run_id,
             )
 
-            return {
-                "status": "success",
-                "action": "regenerate",
-                "workflow_status": "processing_rules",
-            }
-
-        # PATH B: APPROVE
-        with workflow(name="onboarding-run", workflow_id=onboarding_run_id):
-            with workflow(
-                name="employee-onboarding",
-                workflow_id=request_id,
-                version="v1",
-                context={
-                    "request_id": request_id, 
-                    "stage": "approval_and_provisioning",
-                    "reviewer": reviewer,
-                },
-            ):
-                if reconstructed_state:
-                    onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
-                    final_state = onboarding_flow.invoke(None, config=config)
-                else:
-                    final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
-
-        if final_state.get("status") == "provisioning_failed":
-            err_msg = final_state.get("provisioning_error") or "Transaction rolled back during atomic provisioning."
-            logger.error("❌ Atomic provisioning failed for %s: %s", request_id, err_msg)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Provisioning aborted and rolled back: {err_msg}"
-            )
-
-        req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
-        lead_time_sec = 0.0
-        if req_data and req_data.get("created_at"):
-            created_dt = datetime.fromisoformat(req_data["created_at"].replace("Z", "+00:00"))
-            lead_time_sec = round((datetime.now(timezone.utc) - created_dt).total_seconds(), 2)
-
-        supabase.table("onboarding_requests").update({
-            "total_lead_time_seconds": lead_time_sec,
-            "finalized_at": now_iso,
-        }).eq("request_id", request_id).execute()
-
         return {
             "status": "success",
-            "action": payload.action,
-            "workflow_status": final_state.get("status"),
-            "work_email": final_state.get("work_email"),
+            "action": "regenerate",
+            "workflow_status": "processing_rules",
         }
 
+    # APPROVE: execute atomic provisioning synchronously.
+    with workflow(name="onboarding-run", workflow_id=onboarding_run_id):
+        with workflow(
+            name="employee-onboarding",
+            workflow_id=request_id,
+            version="v1",
+            context={
+                "request_id": request_id,
+                "stage": "approval_and_provisioning",
+                "reviewer": reviewer,
+            },
+        ):
+            if reconstructed_state:
+                onboarding_flow.update_state(config, reconstructed_state, as_node="human_approval_gate")
+                final_state = onboarding_flow.invoke(None, config=config)
+            else:
+                final_state = onboarding_flow.invoke(Command(resume=resume_data), config=config)
+
+    if final_state.get("status") == "provisioning_failed":
+        err_msg = final_state.get("provisioning_error") or "Transaction rolled back during atomic provisioning."
+        logger.error("❌ Atomic provisioning failed for %s: %s", request_id, err_msg)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Provisioning aborted and rolled back: {err_msg}"
+        )
+
+    req_data = supabase.table("onboarding_requests").select("created_at").eq("request_id", request_id).single().execute().data
+    lead_time_sec = 0.0
+    if req_data and req_data.get("created_at"):
+        created_dt = datetime.fromisoformat(req_data["created_at"].replace("Z", "+00:00"))
+        lead_time_sec = round((datetime.now(timezone.utc) - created_dt).total_seconds(), 2)
+
+    supabase.table("onboarding_requests").update({
+        "total_lead_time_seconds": lead_time_sec,
+        "finalized_at": now_iso,
+    }).eq("request_id", request_id).execute()
+
+    return {
+        "status": "success",
+        "action": action,
+        "workflow_status": final_state.get("status"),
+        "work_email": final_state.get("work_email"),
+    }
+
+
+@app.post("/onboarding/requests/{request_id}/review")
+def review_onboarding_plan(
+    request_id: str,
+    payload: ReviewPayload,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(RequireRoles(["it_manager"]))
+):
+    """Executes synchronous atomic provisioning on approval, or queues background regeneration."""
+    reviewer = user.employee_id or payload.reviewed_by or "IT_ADMIN"
+
+    try:
+        return _apply_review_decision(
+            request_id=request_id,
+            action=payload.action,
+            note=payload.note or "",
+            reviewer=reviewer,
+            approved_discretionary_ids=payload.approved_discretionary_ids,
+            background_tasks=background_tasks,
+            sync_jira=True,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Review processing failed for %s: %s", request_id, e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Jira webhook (public endpoint; authenticated by shared secret) ---
+
+_JIRA_EVENT_TTL_SECONDS = 300
+_processed_jira_events: dict[str, float] = {}
+_jira_event_lock = threading.Lock()
+
+
+def _claim_jira_event(event_key: str) -> bool:
+    """Best-effort in-process deduplication for Jira webhook retries."""
+    if not event_key:
+        return True
+
+    now = time.time()
+    with _jira_event_lock:
+        expired = [
+            key for key, seen_at in _processed_jira_events.items()
+            if now - seen_at > _JIRA_EVENT_TTL_SECONDS
+        ]
+        for key in expired:
+            _processed_jira_events.pop(key, None)
+
+        if event_key in _processed_jira_events:
+            return False
+        _processed_jira_events[event_key] = now
+        return True
+
+
+def _extract_jira_comment(payload: dict[str, Any]) -> str:
+    comment = payload.get("comment") or {}
+    body = comment.get("body")
+    if body is None:
+        for item in (payload.get("changelog") or {}).get("items") or []:
+            if item.get("field") == "comment":
+                body = item.get("toString")
+                break
+    return adf_to_text(body).strip()
+
+
+def _extract_jira_author(payload: dict[str, Any]) -> dict[str, Any]:
+    return (
+        payload.get("user")
+        or (payload.get("changelog") or {}).get("author")
+        or (payload.get("comment") or {}).get("author")
+        or {}
+    )
+
+
+def _resume_from_jira(request_id: str, action: str, note: str, reviewer: str) -> None:
+    try:
+        _apply_review_decision(
+            request_id=request_id,
+            action=action,
+            note=note,
+            reviewer=reviewer,
+            approved_discretionary_ids=None,
+            background_tasks=None,
+            sync_jira=False,
+        )
+        logger.info("Jira webhook resumed %s with action '%s'.", request_id, action)
+    except Exception as exc:
+        logger.error("Jira webhook resume failed for %s: %s", request_id, exc, exc_info=True)
+
+
+def _valid_jira_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    """Validate Jira Cloud's ``X-Hub-Signature`` HMAC-SHA256 header."""
+    if not signature_header:
+        return False
+
+    if "=" in signature_header:
+        method, provided = signature_header.split("=", 1)
+    else:
+        method, provided = "sha256", signature_header
+
+    if method.strip().casefold() != "sha256":
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided.strip(), expected)
+
+
+@app.post("/webhooks/jira")
+async def jira_webhook(
+    request: FastAPIRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Receive Jira issue status transitions and resume the approval gate.
+
+    Authentication supports both mechanisms Jira can be configured with:
+
+    * ``X-Hub-Signature`` HMAC-SHA256 (native Jira Cloud webhook secret), and
+    * ``X-Jira-Webhook-Secret`` shared secret (Jira Automation / proxy setups).
+    """
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Jira webhook payload must be a JSON object")
+
+    expected_secret = jira_client.config.webhook_secret
+    if expected_secret:
+        shared_header = (request.headers.get("X-Jira-Webhook-Secret") or "").strip()
+        signature_header = (request.headers.get("X-Hub-Signature") or "").strip()
+
+        shared_ok = bool(shared_header) and hmac.compare_digest(shared_header, expected_secret)
+        signature_ok = _valid_jira_signature(raw_body, signature_header, expected_secret)
+        if not (shared_ok or signature_ok):
+            raise HTTPException(status_code=401, detail="Invalid Jira webhook signature")
+    else:
+        logger.warning("JIRA_WEBHOOK_SECRET is not set; accepting unauthenticated Jira webhooks.")
+
+    issue = payload.get("issue") or {}
+    issue_key = str(issue.get("key") or "").strip()
+    if not issue_key:
+        return {"status": "ignored", "reason": "missing issue key"}
+
+    changelog = payload.get("changelog") or {}
+    status_change = next(
+        (item for item in changelog.get("items") or [] if item.get("field") == "status"),
+        None,
+    )
+    new_status = (
+        (status_change or {}).get("toString")
+        or ((issue.get("fields") or {}).get("status") or {}).get("name")
+    )
+    action = map_status_to_action(new_status)
+
+    if not status_change or not action:
+        return {
+            "status": "ignored",
+            "reason": f"status '{new_status}' is not an approval decision",
+        }
+
+    author = _extract_jira_author(payload)
+    if is_service_account(
+        author,
+        jira_client.config.email,
+        os.getenv("JIRA_SERVICE_ACCOUNT_ID", ""),
+    ):
+        return {"status": "ignored", "reason": "event originated from the portal service account"}
+
+    event_key = str(
+        changelog.get("id")
+        or payload.get("timestamp")
+        or f"{issue_key}:{new_status}"
+    )
+    if not _claim_jira_event(event_key):
+        return {"status": "ignored", "reason": "duplicate webhook event"}
+
+    request_res = (
+        supabase.table("onboarding_requests")
+        .select("*")
+        .eq("jira_ticket_id", issue_key)
+        .limit(1)
+        .execute()
+    )
+    if not request_res.data:
+        return {"status": "ignored", "reason": f"no onboarding request linked to {issue_key}"}
+
+    request_row = request_res.data[0]
+    request_id = request_row["request_id"]
+
+    if request_row.get("status") != "pending_approval":
+        return {
+            "status": "ignored",
+            "reason": f"request is in status '{request_row.get('status')}', not pending_approval",
+        }
+
+    snapshot = onboarding_flow.get_state({"configurable": {"thread_id": request_id}})
+    if not snapshot.tasks:
+        return {
+            "status": "ignored",
+            "reason": "workflow is not currently paused at the approval gate",
+        }
+
+    note = _extract_jira_comment(payload)
+    if action == "regenerate" and not note:
+        note = "Revision requested via Jira."
+
+    author_identity = str(
+        author.get("emailAddress") or author.get("displayName") or "jira"
+    ).strip()
+    reviewer = f"JIRA:{author_identity}"
+
+    background_tasks.add_task(_resume_from_jira, request_id, action, note, reviewer)
+
+    return {
+        "status": "accepted",
+        "request_id": request_id,
+        "action": action,
+        "jira_issue": issue_key,
+    }
+
 
 @app.get("/analytics/kpis", response_model=KPIResponse)
 def get_onboarding_kpis(user: CurrentUser = Depends(RequireRoles(["hr_manager", "it_manager", "admin"]))):

@@ -10,6 +10,18 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.agent.state import OnboardingState
 from src.db.client import supabase
+from src.integrations.jira.client import jira_client, JiraError
+from src.integrations.jira.format import (
+    build_logistics_subtask_description,
+    build_onboarding_ticket_description,
+    build_ticket_summary,
+)
+from src.integrations.jira.workflow import (
+    STATUS_DONE,
+    STATUS_IN_PROGRESS,
+    STATUS_NEEDS_REVISION,
+    STATUS_PENDING_APPROVAL,
+)
 from src.rag.service import build_reasoning_prompt, retrieve_onboarding_policies
 from langgraph.types import interrupt
 from pathlib import Path
@@ -84,6 +96,125 @@ def deduplicate_rules(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if prod and "product_id" in prod:
             product_map[prod["product_id"]] = r
     return list(product_map.values())
+
+
+# --- Jira Ticketing Helpers ---
+
+def _get_jira_ticket(request_id: str, state: OnboardingState) -> tuple[Optional[str], Optional[str]]:
+    """Resolve the parent ticket from graph state, falling back to the database."""
+    ticket_id = state.get("jira_ticket_id")
+    if ticket_id:
+        return ticket_id, state.get("jira_ticket_url")
+    if not request_id:
+        return None, None
+
+    try:
+        res = (
+            supabase.table("onboarding_requests")
+            .select("*")
+            .eq("request_id", request_id)
+            .single()
+            .execute()
+        )
+        row = res.data or {}
+        return row.get("jira_ticket_id"), row.get("jira_ticket_url")
+    except Exception as exc:
+        logger.warning("Could not load Jira ticket for %s: %s", request_id, exc)
+        return None, None
+
+
+def _persist_jira_ticket(request_id: str, ticket_id: str, ticket_url: Optional[str]) -> None:
+    try:
+        supabase.table("onboarding_requests").update(
+            {"jira_ticket_id": ticket_id, "jira_ticket_url": ticket_url}
+        ).eq("request_id", request_id).execute()
+    except Exception as exc:
+        logger.error(
+            "Could not persist Jira ticket %s on request %s (did you apply the Jira migration?): %s",
+            ticket_id,
+            request_id,
+            exc,
+        )
+
+
+def _persist_jira_subtask(request_id: str, subtask_id: str) -> None:
+    try:
+        supabase.table("onboarding_requests").update(
+            {"jira_subtask_id": subtask_id}
+        ).eq("request_id", request_id).execute()
+    except Exception as exc:
+        logger.error(
+            "Could not persist Jira sub-task %s on request %s (did you apply the Jira migration?): %s",
+            subtask_id,
+            request_id,
+            exc,
+        )
+
+
+def _ensure_jira_status(ticket_id: Optional[str], status: str) -> None:
+    if not ticket_id or not jira_client.is_configured:
+        return
+    try:
+        if not jira_client.ensure_status(ticket_id, status):
+            logger.warning("Jira ticket %s could not be moved to '%s'.", ticket_id, status)
+    except Exception as exc:
+        logger.warning("Jira status sync failed for %s: %s", ticket_id, exc)
+
+
+def _sync_plan_ticket(
+    state: OnboardingState,
+    request_id: str,
+    attempt_count: int,
+) -> dict[str, Any]:
+    """Create the parent ticket on the first attempt, otherwise refresh it."""
+    if not jira_client.is_configured:
+        logger.debug("Jira is not configured; skipping ticket sync for %s.", request_id)
+        return {}
+
+    ticket_id, ticket_url = _get_jira_ticket(request_id, state)
+    description_state = {
+        **state,
+        "status": "pending_approval",
+        "attempt_count": attempt_count,
+    }
+    summary = build_ticket_summary(description_state)
+    description = build_onboarding_ticket_description(description_state)
+    candidate = state.get("candidate_data") or {}
+    department = str(candidate.get("department") or "").strip()
+    labels = ["onboarding"] + ([f"dept-{department}"] if department else [])
+
+    try:
+        if ticket_id:
+            jira_client.update_issue(
+                ticket_id,
+                summary=summary,
+                description=description,
+                labels=labels,
+            )
+            # Regenerations update the same ticket and put it back into review.
+            _ensure_jira_status(ticket_id, STATUS_PENDING_APPROVAL)
+            logger.info("Updated Jira ticket %s for %s (attempt %s).", ticket_id, request_id, attempt_count)
+        else:
+            issue = jira_client.create_issue(
+                summary=summary,
+                description=description,
+                labels=labels,
+            )
+            ticket_id = issue.get("key") or ""
+            if not ticket_id:
+                raise JiraError(f"Jira create response did not include an issue key: {issue}")
+            ticket_url = jira_client.browse_url(ticket_id)
+            _ensure_jira_status(ticket_id, STATUS_PENDING_APPROVAL)
+            logger.info("Created Jira ticket %s for %s.", ticket_id, request_id)
+    except Exception as exc:
+        logger.error("Jira ticket sync failed for %s: %s", request_id, exc, exc_info=True)
+        return {}
+
+    if not ticket_id:
+        return {}
+
+    _persist_jira_ticket(request_id, ticket_id, ticket_url)
+    return {"jira_ticket_id": ticket_id, "jira_ticket_url": ticket_url}
 
 
 # --- Agentic Planning Nodes ---
@@ -217,13 +348,24 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
         raise e
 
     ai_plan = validated_plan.model_dump()
+    hardware_plan = ai_plan.get("hardware_provisioning") or {}
+    work_loc = str(state.get("candidate_data", {}).get("work_location") or "").strip().lower()
+    if work_loc in ("remote", "hybrid"):
+        hardware_plan["shipping_required"] = True
+    ai_plan["hardware_provisioning"] = hardware_plan
 
     current_prompt = state.get("tokens_prompt", 0) + prompt_tokens
     current_completion = state.get("tokens_completion", 0) + completion_tokens
 
+    # Keep deterministic compliance flags (computed in fetch_context_node) when
+    # merging the LLM's own policy exceptions.
+    merged_flags = list(dict.fromkeys(
+        list(state.get("flagged_exceptions", [])) + list(ai_plan.get("flagged_exceptions", []))
+    ))
+
     return {
         "suggested_hardware": ai_plan.get("hardware_provisioning", {}),
-        "flagged_exceptions": ai_plan.get("flagged_exceptions", []),
+        "flagged_exceptions": merged_flags,
         "policy_tags": ai_plan.get("policy_citations", []),
         "tokens_prompt": current_prompt,
         "tokens_completion": current_completion,
@@ -233,6 +375,7 @@ def llm_planning_node(state: OnboardingState) -> dict[str, Any]:
 def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
     """Persists workflow run artifacts and places the request into approval state."""
     request_id = state["request_id"]
+    attempt_count = state.get("attempt_count", 1)
 
     # Insert plan record and capture the generated run_id
     insert_res = supabase.table("workflow_runs").insert(
@@ -257,7 +400,7 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
             "tokens_prompt": state.get("tokens_prompt", 0),
             "tokens_completion": state.get("tokens_completion", 0),
             "tokens_total": state.get("tokens_total", 0),
-            "attempt_number": state.get("attempt_count", 1),
+            "attempt_number": attempt_count,
         }
     ).execute()
 
@@ -267,9 +410,12 @@ def persist_plan_node(state: OnboardingState) -> dict[str, Any]:
         {"status": "pending_approval"}
     ).eq("request_id", request_id).execute()
 
+    jira_state = _sync_plan_ticket(state, request_id, attempt_count)
+
     return {
         "status": "pending_approval",
         "current_run_id": run_id,
+        **jira_state,
     }
 
 def discretionary_licensing_node(state: OnboardingState) -> dict[str, Any]:
@@ -471,6 +617,9 @@ def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
             product_ids_to_assign.add(pid)
     product_ids_to_assign.update(approved_disc_ids)
 
+    ticket_id, _ = _get_jira_ticket(req_id, state)
+    _ensure_jira_status(ticket_id, STATUS_IN_PROGRESS)
+
     rpc_payload = {
         "p_request_id": req_id,
         "p_employee_id": emp_id,
@@ -506,7 +655,8 @@ def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
             })
             auth_user_id = auth_user.user.id
         except Exception as auth_err:
-            if "already registered" in str(auth_err) or "already exists" in str(auth_err):
+            err_lower = str(auth_err).lower()
+            if "already" in err_lower and ("registered" in err_lower or "exists" in err_lower):
                 existing_users = supabase.auth.admin.list_users()
                 auth_user_id = next((u.id for u in existing_users if u.email == work_email), None)
             else:
@@ -523,6 +673,50 @@ def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
             }, on_conflict="user_id").execute()
             logger.info("🔑 [New Hire Provisioned] Created portal account: %s (Pass: %s)", work_email, DEFAULT_NEW_HIRE_PASSWORD)
 
+        # Physical hardware cannot be shipped by the provisioning RPC. Spawn a
+        # linked Facilities/Logistics sub-task for the Jira parent ticket.
+        hardware = state.get("suggested_hardware") or {}
+        if hardware.get("shipping_required") and ticket_id and jira_client.is_configured:
+            candidate_name = " ".join(
+                part for part in (
+                    str(cand.get("first_name") or "").strip(),
+                    str(cand.get("last_name") or "").strip(),
+                ) if part
+            ) or emp_id
+            try:
+                subtask = jira_client.create_subtask(
+                    parent_key=ticket_id,
+                    summary=f"[Logistics] Ship hardware to {candidate_name} ({req_id})",
+                    description=build_logistics_subtask_description(
+                        {**state, "candidate_data": cand}
+                    ),
+                    labels=["onboarding", "logistics"],
+                    assignee_account_id=(
+                        jira_client.config.logistics_assignee_account_id or None
+                    ),
+                )
+                subtask_key = subtask.get("key")
+                logger.info(
+                    "📦 [Jira] Created logistics sub-task %s under %s.",
+                    subtask_key,
+                    ticket_id,
+                )
+                if subtask_key:
+                    _persist_jira_subtask(req_id, subtask_key)
+                    try:
+                        jira_client.add_comment(
+                            ticket_id,
+                            f"Logistics sub-task {subtask_key} created for hardware shipment.",
+                        )
+                    except Exception as comment_exc:
+                        logger.warning("Could not comment on Jira ticket %s: %s", ticket_id, comment_exc)
+            except Exception as jira_exc:
+                logger.error(
+                    "Could not create Jira logistics sub-task for %s: %s",
+                    req_id,
+                    jira_exc,
+                )
+
         return {
             "status": "provisioned",
             "work_email": work_email,
@@ -538,13 +732,26 @@ def execute_provisioning_node(state: OnboardingState) -> dict[str, Any]:
         }
 
 def finalize_workflow_node(state: OnboardingState) -> dict[str, Any]:
-    if state.get("status") == "provisioning_failed":
-        supabase.table("onboarding_requests").update(
-                {"status": "provisioning_failed"}
-            ).eq("request_id", request_id).execute()
-        return {"status": "failed"}
     request_id = state.get("request_id")
     reviewer = state.get("reviewed_by") or "IT_ADMIN"
+    ticket_id, _ = _get_jira_ticket(request_id, state)
+
+    if state.get("status") == "provisioning_failed":
+        if request_id:
+            supabase.table("onboarding_requests").update(
+                {"status": "provisioning_failed"}
+            ).eq("request_id", request_id).execute()
+
+        if ticket_id and jira_client.is_configured:
+            try:
+                jira_client.add_comment(
+                    ticket_id,
+                    "Provisioning failed and was rolled back: "
+                    f"{state.get('provisioning_error') or 'unknown error'}",
+                )
+            except Exception as exc:
+                logger.warning("Could not comment on Jira ticket %s: %s", ticket_id, exc)
+        return {"status": "failed"}
 
     supabase.table("onboarding_requests").update(
         {"status": "completed"}
@@ -556,6 +763,18 @@ def finalize_workflow_node(state: OnboardingState) -> dict[str, Any]:
             "updated_at": datetime.now().isoformat(),
         }
     ).eq("request_id", request_id).execute()
+
+    if ticket_id:
+        _ensure_jira_status(ticket_id, STATUS_DONE)
+        if jira_client.is_configured:
+            try:
+                work_email = state.get("work_email")
+                message = "Provisioning completed by the Onboarding Portal."
+                if work_email:
+                    message += f" Work email: {work_email}"
+                jira_client.add_comment(ticket_id, message)
+            except Exception as exc:
+                logger.warning("Could not comment on Jira ticket %s: %s", ticket_id, exc)
 
     return {"status": "completed"}
 
@@ -608,5 +827,16 @@ def handle_max_retries_node(state: OnboardingState) -> dict[str, Any]:
     supabase.table("onboarding_requests").update(
         {"status": "requires_manual_intervention"}
     ).eq("request_id", request_id).execute()
+
+    ticket_id, _ = _get_jira_ticket(request_id, state)
+    if ticket_id and jira_client.is_configured:
+        try:
+            jira_client.add_comment(
+                ticket_id,
+                "Escalated: the maximum number of revision attempts was reached. "
+                "Manual IT intervention is required.",
+            )
+        except Exception as exc:
+            logger.warning("Could not comment on Jira ticket %s: %s", ticket_id, exc)
 
     return {"status": "requires_manual_intervention"}

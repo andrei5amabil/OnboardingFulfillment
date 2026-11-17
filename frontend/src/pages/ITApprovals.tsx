@@ -11,6 +11,7 @@ import {
   XCircle,
   Server,
   Radio,
+  ExternalLink,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { OnboardingRequest, ReviewPayload } from '../types/provisioning';
@@ -226,6 +227,18 @@ export const ITApprovalsPage: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-2.5 text-xs font-mono">
                     <span className="text-slate-600 font-bold">{reqId}</span>
+                    {task.jira_ticket_id && task.jira_ticket_url && (
+                      <a
+                        href={task.jira_ticket_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-900 font-bold hover:bg-blue-100 transition-colors"
+                        title="Open the linked Jira ticket"
+                      >
+                        <span>{task.jira_ticket_id}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
                     <span
                       className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
                         task.status === 'pending_approval'
