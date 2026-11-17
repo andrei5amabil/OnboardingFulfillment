@@ -62,6 +62,9 @@ export interface OnboardingRequest {
     | 'completed'
     | 'failed'
     | string;
+  jira_ticket_id?: string | null;
+  jira_ticket_url?: string | null;
+  jira_subtask_id?: string | null;
   workflow_runs?: WorkflowRun[];
 }
 
